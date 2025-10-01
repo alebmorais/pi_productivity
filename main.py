@@ -14,10 +14,10 @@ from ocr_notes import OCRNotes, OCRConfig
 # -------------------- Configs .env --------------------
 # Loops automáticos
 AUTO_POSTURE = os.getenv("AUTO_POSTURE","1") == "1"
-POSTURE_INTERVAL = int(os.getenv("POSTURE_INTERVAL_SEC","30"))
+POSTURE_INTERVAL = int(os.getenv("POSTURE_INTERVAL_SEC","120"))
 
 AUTO_OCR = os.getenv("AUTO_OCR","1") == "1"
-OCR_INTERVAL = int(os.getenv("OCR_INTERVAL_SEC","900"))
+OCR_INTERVAL = int(os.getenv("OCR_INTERVAL_SEC","30"))
 
 # Motion via OCR
 MOTION_ENABLE_OCR = os.getenv("MOTION_ENABLE_OCR","0") == "1"
@@ -357,7 +357,7 @@ class App:
                 print(f"[Auto/OCR] Salvo: {img} | {txt}")
             except Exception as e:
                 print("[Auto/OCR] Erro:", e)
-            time.sleep(max(60, OCR_INTERVAL))
+            time.sleep(max(5, OCR_INTERVAL))
 
     # ---------------- UI básica ----------------
     def _render_mode_banner(self):
