@@ -81,7 +81,8 @@ class App:
 
         self.posture = PostureMonitor(PostureConfig())
         self.ocr = OCRNotes(OCRConfig())
-
+        self._cam_lock = threading.Lock()
+        
         # Inicia loops automáticos
         if AUTO_POSTURE:
             t = threading.Thread(target=self._auto_posture_loop, daemon=True)
@@ -208,20 +209,23 @@ class App:
     def _ensure_camera(self):
         # lazy init
         if not hasattr(self, "cam"):
-            from picamera2 import Picamera2
-            self.cam = Picamera2()
-            self.cam.configure(self.cam.create_still_configuration())
-            self.cam.start()
-
+            with self._cam_lock:
+                if not hasattr(self, "cam"):
+                    from picamera2 import Picamera2
+                    self.cam = Picamera2()
+                    self.cam.configure(self.cam.create_still_configuration())
+                    self.cam.start()
+            
     def run_posture_once(self):
         from sense_mode import RED, GREEN
         self._ensure_camera()
-        frame = self.cam.capture_array()
-        status = self.posture.analyze_frame(frame)
-        try:
-            if not status.get("ok"):
-                self.posture_adjust_count += 1
-            self._log_posture_text(status)
+        with self._cam_lock:
+            frame = self.cam.capture_array()
+            status = self.posture.analyze_frame(frame)
+            try:
+                import cv2
+                cv2.imwrite(os.path.join(BASE_DIR, "last_posture.jpg"), frame)
+            except Exception:
             self._log_posture_csv(status)
         except Exception as e:
             print("[PostureLog] aviso:", e)
@@ -236,8 +240,9 @@ class App:
 
     def run_ocr_once(self):
         self._ensure_camera()
-        frame = self.cam.capture_array()
-        img_path, txt_path, text = self.ocr.capture_and_ocr(frame)
+        with self._cam_lock:
+            frame = self.cam.capture_array()
+            img_path, txt_path, text = self.ocr.capture_and_ocr(frame)
         try:
             if MOTION_ENABLE_OCR and hasattr(self, "_ocr_apply_to_motion"):
                 self._ocr_apply_to_motion(text)
