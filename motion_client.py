@@ -1,8 +1,9 @@
-# motion_client.py
 import os, requests
 from dotenv import load_dotenv
 
-load_dotenv(os.path.expanduser("~/pi_productivity/.env"))
+BASE_DIR = os.path.expanduser("~/pi_productivity")
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
 BASE = "https://api.usemotion.com/v1"
 
 class MotionClient:
@@ -28,10 +29,8 @@ class MotionClient:
         r.raise_for_status()
         return r.json()
 
-    # ====== Funções utilitárias ======
-
     def list_all_tasks_simple(self, limit=200):
-        data = self.get("/tasks", params={"limit": limit})
+        data = self.get("/tasks", params={"limit":limit})
         return data.get("tasks", data)
 
     def find_task_by_name(self, needle):
@@ -47,7 +46,7 @@ class MotionClient:
         payload = {"name": name}
         if description: payload["description"] = description
         if due_date_iso: payload["dueDate"] = due_date_iso
-        if labels: payload["labels"] = labels  # lista de strings
+        if labels: payload["labels"] = labels
         if duration_minutes: payload["duration"] = int(duration_minutes)
         return self.post("/tasks", payload)
 
