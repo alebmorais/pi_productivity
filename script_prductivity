@@ -1,0 +1,193 @@
+cd ~/pi_productivity
+
+# Dependência para gráficos (dentro do seu venv):
+source .venv/bin/activate
+pip install matplotlib
+
+# Cria a pasta de análises
+mkdir -p analytics
+
+# Cria o script de análise
+cat > analyze_productivity.py <<'PY'
+import os, csv, math
+from datetime import datetime
+import argparse
+
+import matplotlib
+matplotlib.use("Agg")  # render sem display
+import matplotlib.pyplot as plt
+
+BASE = os.path.expanduser("~/pi_productivity")
+LOG_DIR = os.path.join(BASE, "logs")
+OUT_DIR = os.path.join(BASE, "analytics")
+
+POSTURE_CSV = os.path.join(LOG_DIR, "posture_events.csv")
+TASK_CSV    = os.path.join(LOG_DIR, "task_events.csv")
+
+def parse_date(ts):
+    # aceita "YYYY-mm-dd HH:MM:SS"
+    try:
+        return datetime.strptime(ts[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+def read_posture(path):
+    """Retorna dict: date -> {'adjust':int, 'events':int}"""
+    agg = {}
+    if not os.path.exists(path):
+        return agg
+    with open(path, newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            d = parse_date(row.get("timestamp",""))
+            if not d: continue
+            ok = row.get("ok")
+            # ok pode ser '1'/'0' ou 'True'/'False'
+            is_ok = str(ok).strip() in ("1","True","true")
+            a = agg.setdefault(d, {"adjust":0,"events":0})
+            a["events"] += 1
+            if not is_ok:
+                a["adjust"] += 1
+    return agg
+
+def read_tasks(path):
+    """Retorna dict: date -> {'completed':int,'created':int}"""
+    agg = {}
+    if not os.path.exists(path):
+        return agg
+    with open(path, newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            d = parse_date(row.get("timestamp",""))
+            if not d: continue
+            action = (row.get("action","") or "").strip().lower()
+            a = agg.setdefault(d, {"completed":0,"created":0})
+            if action == "complete":
+                a["completed"] += 1
+            elif action == "create":
+                a["created"] += 1
+    return agg
+
+def merge_daily(posture, tasks):
+    """Produz lista de linhas diárias ordenadas por data."""
+    all_days = sorted(set(posture.keys()) | set(tasks.keys()))
+    rows = []
+    for d in all_days:
+        p = posture.get(d, {})
+        t = tasks.get(d, {})
+        rows.append({
+            "date": d.isoformat(),
+            "posture_adjust": int(p.get("adjust",0)),
+            "posture_events": int(p.get("events",0)),
+            "tasks_completed": int(t.get("completed",0)),
+            "tasks_created": int(t.get("created",0)),
+        })
+    return rows
+
+def save_summary_csv(rows, out_csv):
+    hdr = ["date","posture_adjust","posture_events","tasks_completed","tasks_created"]
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=hdr)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+def plot_bar(dates, values, title, ylabel, outpath):
+    if not dates:
+        return
+    plt.figure()
+    plt.bar(dates, values)
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    plt.savefig(outpath)
+    plt.close()
+
+def pearson_corr(xs, ys):
+    n = len(xs)
+    if n < 2: return float("nan")
+    mx = sum(xs)/n
+    my = sum(ys)/n
+    num = sum((x-mx)*(y-my) for x,y in zip(xs,ys))
+    denx = math.sqrt(sum((x-mx)**2 for x in xs))
+    deny = math.sqrt(sum((y-my)**2 for y in ys))
+    if denx == 0 or deny == 0: return float("nan")
+    return num/(denx*deny)
+
+def plot_scatter(xs, ys, labels, title, xlabel, ylabel, outpath):
+    if not xs or not ys:
+        return
+    plt.figure()
+    plt.scatter(xs, ys)
+    # anota pontos com datas (opcional)
+    for (x,y,l) in zip(xs,ys,labels):
+        plt.annotate(l[-5:], (x,y))  # mostra apenas fim da data (mm-dd) para não poluir
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.tight_layout()
+    plt.savefig(outpath)
+    plt.close()
+
+def main():
+    ap = argparse.ArgumentParser(description="Analisa logs de postura e tarefas.")
+    ap.add_argument("--posture", default=POSTURE_CSV, help="Caminho para posture_events.csv")
+    ap.add_argument("--tasks",   default=TASK_CSV,    help="Caminho para task_events.csv")
+    ap.add_argument("--outdir",  default=OUT_DIR,     help="Diretório de saída")
+    args = ap.parse_args()
+
+    os.makedirs(args.outdir, exist_ok=True)
+
+    posture = read_posture(args.posture)
+    tasks   = read_tasks(args.tasks)
+    rows    = merge_daily(posture, tasks)
+
+    # Salva resumo CSV
+    out_csv = os.path.join(args.outdir, "summary_daily.csv")
+    save_summary_csv(rows, out_csv)
+
+    # Vetores para gráficos
+    dates = [r["date"] for r in rows]
+    adj   = [r["posture_adjust"]  for r in rows]
+    done  = [r["tasks_completed"] for r in rows]
+
+    # Gráficos
+    plot_bar(dates, adj,
+             "Ajustes de postura por dia",
+             "Ajustes",
+             os.path.join(args.outdir, "posture_per_day.png"))
+
+    plot_bar(dates, done,
+             "Tarefas concluídas por dia",
+             "Concluídas",
+             os.path.join(args.outdir, "tasks_completed_per_day.png"))
+
+    # Dispersão + correlação
+    r = pearson_corr(adj, done) if adj and done else float("nan")
+    plot_scatter(adj, done, dates,
+                 "Postura (ajustes) vs Tarefas concluídas",
+                 "Ajustes de postura (dia)",
+                 "Tarefas concluídas (dia)",
+                 os.path.join(args.outdir, "posture_vs_tasks_scatter.png"))
+
+    # Relatório
+    with open(os.path.join(args.outdir, "report.txt"), "w", encoding="utf-8") as f:
+        f.write("Resumo da análise\n")
+        f.write("=================\n\n")
+        f.write(f"Linhas no resumo diário: {len(rows)}\n")
+        f.write(f"Correlação Pearson (ajustes vs concluídas): {r:.3f}\n\n")
+        if rows:
+            f.write("Últimos dias:\n")
+            show = rows[-10:] if len(rows) > 10 else rows
+            for rrow in show:
+                f.write(f"- {rrow['date']}: ajustes={rrow['posture_adjust']}, concluidas={rrow['tasks_completed']}\n")
+
+    print("Análise concluída.")
+    print(f"- CSV diário: {out_csv}")
+    print(f"- Gráficos: {os.path.join(args.outdir,'posture_per_day.png')}, {os.path.join(args.outdir,'tasks_completed_per_day.png')}, {os.path.join(args.outdir,'posture_vs_tasks_scatter.png')}")
+    print(f"- Relatório: {os.path.join(args.outdir,'report.txt')}")
+    
+if __name__ == "__main__":
+    main()
+PY
