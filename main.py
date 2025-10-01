@@ -219,14 +219,18 @@ class App:
     def run_posture_once(self):
         from sense_mode import RED, GREEN
         self._ensure_camera()
-        with self._cam_lock:
-            frame = self.cam.capture_array()
-            status = self.posture.analyze_frame(frame)
-            try:
-                import cv2
-                cv2.imwrite(os.path.join(BASE_DIR, "last_posture.jpg"), frame)
-            except Exception:
-            self._log_posture_csv(status)
+        status = {}
+        frame = None
+        try:
+            with self._cam_lock:
+                frame = self.cam.capture_array()
+                status = self.posture.analyze_frame(frame)
+                try:
+                    import cv2
+                    cv2.imwrite(os.path.join(BASE_DIR, "last_posture.jpg"), frame)
+                except Exception:
+                    pass
+                self._log_posture_csv(status)
         except Exception as e:
             print("[PostureLog] aviso:", e)
         self._flash(GREEN if status.get("ok") else RED, times=3)
