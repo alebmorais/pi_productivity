@@ -191,3 +191,37 @@ def main():
 if __name__ == "__main__":
     main()
 PY
+------------------------
+
+2) Como rodar a análise
+
+Com o venv ativo:
+
+cd ~/pi_productivity
+source .venv/bin/activate
+python analyze_productivity.py
+
+
+Saídas (arquivos):
+
+~/pi_productivity/analytics/summary_daily.csv
+
+~/pi_productivity/analytics/posture_per_day.png
+
+~/pi_productivity/analytics/tasks_completed_per_day.png
+
+~/pi_productivity/analytics/posture_vs_tasks_scatter.png
+
+~/pi_productivity/analytics/report.txt
+
+Abrir no Pi (interface gráfica):
+
+xdg-open ~/pi_productivity/analytics/posture_per_day.png
+xdg-open ~/pi_productivity/analytics/tasks_completed_per_day.png
+xdg-open ~/pi_productivity/analytics/posture_vs_tasks_scatter.png
+xdg-open ~/pi_productivity/analytics/report.txt
+
+
+Se preferir, dá para ajustar a localização dos CSVs com:
+
+python analyze_productivity.py --posture ~/pi_productivity/logs/posture_events.csv --tasks
