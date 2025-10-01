@@ -95,10 +95,10 @@ OCR_DEFAULT_DUE_DAYS=2
 
 # Loops automáticos
 AUTO_POSTURE=1
-POSTURE_INTERVAL_SEC=30
+POSTURE_INTERVAL_SEC=120
 
 AUTO_OCR=1
-OCR_INTERVAL_SEC=900   # 15 min
+OCR_INTERVAL_SEC=30   
 
 # Hidratação (LED com gota azul-clara)
 HYDRATE_ENABLE=1
@@ -118,8 +118,8 @@ python main.py
 
 Você deve ver no terminal:
 
-[Auto] Postura ligada (cada 30s)
-[Auto] OCR ligado (cada 900s)
+[Auto] Postura ligada (cada 120s)
+[Auto] OCR ligado (cada 30s)
 [Auto] Hidratação ligada (cada 40 min)
 
 7) Controles (Sense HAT — joystick)
