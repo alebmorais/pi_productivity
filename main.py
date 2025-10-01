@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.expanduser("~/pi_productivity")
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-from sense_modes import sense  # já existe no projeto
+from sense_mode import sense  # já existe no projeto
 from motion_client import MotionClient
 from camera_posture import PostureMonitor, PostureConfig
 from ocr_notes import OCRNotes, OCRConfig
@@ -214,7 +214,7 @@ class App:
             self.cam.start()
 
     def run_posture_once(self):
-        from sense_modes import RED, GREEN
+        from sense_mode import RED, GREEN
         self._ensure_camera()
         frame = self.cam.capture_array()
         status = self.posture.analyze_frame(frame)
@@ -366,7 +366,7 @@ class App:
         self._show_mode_pattern(name)
 
     def handle_joystick(self, event):
-        # você já tinha; se não tiver, implemente conforme seu sense_modes
+        # você já tinha; se não tiver, implemente conforme seu sense_mode
         pass
 
     def maybe_poll_motion(self):
