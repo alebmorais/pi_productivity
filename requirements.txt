@@ -1,0 +1,9 @@
+
+python-dotenv==1.0.1
+requests==2.32.3
+pillow==10.4.0
+sense-hat==2.6.0
+tzdata==2024.1
+pytz==2024.1
+opencv-python==4.10.0.84
+pytesseract==0.3.13
