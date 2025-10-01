@@ -6,7 +6,13 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.expanduser("~/pi_productivity")
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-from sense_mode import sense  # já existe no projeto
+from sense_mode import (
+    sense,
+    HapvidaMode,
+    CarePlusMode,
+    StudyADHDMode,
+    LeisureMode,
+)  # já existe no projeto
 from motion_client import MotionClient
 from camera_posture import PostureMonitor, PostureConfig
 from ocr_notes import OCRNotes, OCRConfig
@@ -65,6 +71,13 @@ class App:
     def __init__(self):
         self.mode_index = 0
         self._auto_threads = []
+        self._mode_timers = {
+            "TRABALHO: HAPVIDA": HapvidaMode(),
+            "TRABALHO: CARE PLUS": CarePlusMode(),
+            "ESTUDO (TDAH)": StudyADHDMode(),
+            "LAZER": LeisureMode(),
+        }
+        self._active_timer = None
 
         # Estado sessão postura / tarefas concluídas no dia
         self.posture_adjust_count = 0
@@ -375,8 +388,39 @@ class App:
         self._show_mode_pattern(name)
 
     def handle_joystick(self, event):
-        # você já tinha; se não tiver, implemente conforme seu sense_mode
-        pass
+     if event.action not in ("pressed", "held"):
+            return
+
+        delta = 0
+        if event.direction in ("right", "up"):
+            delta = 1
+        elif event.direction in ("left", "down"):
+            delta = -1
+        else:
+            return
+
+        prev_mode = self.MODES[self.mode_index]
+        self.mode_index = (self.mode_index + delta) % len(self.MODES)
+        self._render_mode_banner()
+        self._apply_mode_logic(prev_mode, self.MODES[self.mode_index])
+
+    def _apply_mode_logic(self, previous_mode, current_mode):
+        previous_timer = self._mode_timers.get(previous_mode)
+        new_timer = self._mode_timers.get(current_mode)
+
+        if previous_timer and previous_timer is not new_timer:
+            previous_timer.stop()
+            if self._active_timer is previous_timer:
+                self._active_timer = None
+            if new_timer is None:
+                self._render_mode_banner()
+
+        if new_timer:
+            if self._active_timer is not new_timer:
+                new_timer.start()
+                self._active_timer = new_timer
+        else:
+            self._active_timer = None
 
     def maybe_poll_motion(self):
         # você já tinha; respeita regra “não mostrar long-term hoje”
