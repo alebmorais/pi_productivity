@@ -1,52 +1,62 @@
-import time, math, cv2
+# camera_posture.py
 from dataclasses import dataclass
+import os
+import cv2
+import numpy as np
 
 @dataclass
 class PostureConfig:
-    frame_width: int = 640
-    frame_height: int = 480
-    min_face_size: int = 80
-    max_tilt_deg: float = 20.0
-    max_nod_deg: float = 20.0
-    slouch_close_ratio: float = 0.33
-    stable_seconds: float = 2.0
+    face_scale_factor: float = 1.1
+    face_min_neighbors: int = 5
+    tilt_thresh_deg: float = 12.0   # inclinação lateral (roll)
+    nod_thresh_deg: float = 12.0    # inclinação frente/trás (pitch)
+
+def _load_face_cascade():
+    # Caminhos típicos no Debian/Raspberry Pi para os haarcascades
+    candidates = [
+        "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
+        "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return cv2.CascadeClassifier(p)
+    raise FileNotFoundError(
+        "Não encontrei 'haarcascade_frontalface_default.xml' em /usr/share/opencv4/haarcascades"
+    )
 
 class PostureMonitor:
-    def __init__(self, config: PostureConfig|None=None):
-        self.cfg = config or PostureConfig()
-        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        self.bad_since = None
+    def __init__(self, cfg: PostureConfig):
+        self.cfg = cfg
+        self.face_cascade = _load_face_cascade()
 
-    def _estimate_angles(self, face_rect, frame):
-        (x,y,w,h) = face_rect
-        roi = frame[y:y+h, x:x+w]
-        if roi.size == 0:
-            return 0.0, 0.0
-        gx = cv2.Sobel(roi, cv2.CV_32F, 1, 0, ksize=3)
-        gy = cv2.Sobel(roi, cv2.CV_32F, 0, 1, ksize=3)
-        import math
-        angle = math.degrees(math.atan2(gy.mean() + 1e-6, gx.mean() + 1e-6))
-        tilt = max(min(angle, 90.0), -90.0)
-        nod = math.degrees(math.atan2(h, w)) - 45.0
-        return tilt, nod
+    def _estimate_angles_from_landmarks(self, gray, face_rect):
+        # Simples heurística com bounding box: não é perfeito, mas leve.
+        (x, y, w, h) = face_rect
+        cx, cy = x + w / 2, y + h / 2
+        # Medidas relativas para um "roll/pitch" aproximado
+        roll = (cx - gray.shape[1] / 2) / gray.shape[1] * 40.0   # ~±20°
+        pitch = (gray.shape[0] / 2 - cy) / gray.shape[0] * 40.0  # ~±20°
+        return roll, pitch
 
-    def analyze_frame(self, frame_bgr):
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(self.cfg.min_face_size, self.cfg.min_face_size))
-        status = {"ok": True, "reason": None, "tilt": 0.0, "nod": 0.0, "faces": len(faces)}
+    def analyze_frame(self, frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=self.cfg.face_scale_factor,
+            minNeighbors=self.cfg.face_min_neighbors,
+            minSize=(60, 60),
+        )
         if len(faces) == 0:
-            status["ok"] = False
-            status["reason"] = "face_not_found"
-            return status
-        faces = sorted(faces, key=lambda r: r[2]*r[3], reverse=True)
-        (x,y,w,h) = faces[0]
-        tilt, nod = self._estimate_angles((x,y,w,h), gray)
-        status["tilt"] = tilt
-        status["nod"] = nod
-        too_close = h >= self.cfg.frame_height * self.cfg.slouch_close_ratio
-        bad_tilt = abs(tilt) > self.cfg.max_tilt_deg
-        bad_nod  = abs(nod)  > self.cfg.max_nod_deg
-        if too_close or bad_tilt or bad_nod:
-            status["ok"] = False
-            status["reason"] = "too_close" if too_close else ("tilt" if bad_tilt else "nod")
-        return status
+            return {"ok": True, "reason": "face_not_found", "tilt": 0.0, "nod": 0.0}
+
+        # pega a maior face
+        faces = sorted(faces, key=lambda r: r[2] * r[3], reverse=True)
+        roll, pitch = self._estimate_angles_from_landmarks(gray, faces[0])
+
+        need_adjust = abs(roll) > self.cfg.tilt_thresh_deg or abs(pitch) > self.cfg.nod_thresh_deg
+        reason = "ok"
+        if abs(roll) > self.cfg.tilt_thresh_deg:
+            reason = "tilt"
+        if abs(pitch) > self.cfg.nod_thresh_deg:
+            reason = "nod" if reason == "ok" else (reason + "+nod")
+        return {"ok": not need_adjust, "reason": reason, "tilt": float(roll), "nod": float(pitch)}
