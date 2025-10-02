@@ -45,6 +45,7 @@ import json
 import time
 import enum
 import threading
+import xml.etree.ElementTree as ET
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -61,6 +62,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 WEB_DIR = Path(__file__).parent / "web"
 TEMPLATES_DIR = WEB_DIR
 STATIC_DIR = WEB_DIR / "static"
+DOG_SVG_PATH = STATIC_DIR / "dog.svg"
 MOTION_LOG = Path("/var/log/motion/motion.log")  # adjust if needed
 PORT = int(os.getenv("WEBAPP_PORT", "8090"))
 HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
@@ -278,7 +280,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
   <main class="grid">
     <section class="panel corgi-panel">
-      <img id="corgi" src="/dog.svg?mode=idle" alt="Dog mascot" />
+      <img id="corgi" src="/static/dog.svg" alt="Dog mascot" />
       <div class="mode" id="mode">Mode: ...</div>
     </section>
 
@@ -387,6 +389,47 @@ async function initWS(){
 refreshOnce();
 initWS();
 """
+
+DOG_SVG_FALLBACK = """<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Dog mascot">
+  <rect id="bg" width="320" height="320" rx="28" fill="#0f1720"/>
+  <g id="dog" transform="translate(40 60)">
+    <g id="ear-left-group" transform="rotate(0 60 40)">
+      <path id="ear-left" d="M14 88 Q60 4 106 66 L86 98 Z" fill="#ffd8b3" stroke="#3d2b1f" stroke-width="4"/>
+    </g>
+    <g id="ear-right-group" transform="translate(120 0) rotate(0 60 40)">
+      <path id="ear-right" d="M14 88 Q60 4 106 66 L86 98 Z" fill="#ffd8b3" stroke="#3d2b1f" stroke-width="4"/>
+    </g>
+    <ellipse id="body" cx="120" cy="160" rx="120" ry="100" fill="#f7b37f" stroke="#3d2b1f" stroke-width="6"/>
+    <ellipse id="belly" cx="120" cy="200" rx="82" ry="60" fill="#fff4e6" opacity="0.95"/>
+    <g id="tail-group" transform="rotate(-12 0 180)">
+      <path id="tail-path" d="M-36 220 Q-60 140 -6 130" fill="none" stroke="#f7b37f" stroke-width="22" stroke-linecap="round"/>
+      <circle id="tail-tip" cx="-8" cy="128" r="18" fill="#fff4e6"/>
+    </g>
+    <ellipse id="eye-left" cx="80" cy="110" rx="20" ry="14" fill="#161616"/>
+    <ellipse id="eye-right" cx="160" cy="110" rx="20" ry="14" fill="#161616"/>
+    <circle id="eye-highlight-left" cx="72" cy="101.6" r="7" fill="#ffffff" opacity="0.6"/>
+    <circle id="eye-highlight-right" cx="152" cy="101.6" r="7" fill="#ffffff" opacity="0.6"/>
+    <circle id="cheek-left" cx="70" cy="180" r="20" fill="#ffceb0" opacity="0.5"/>
+    <circle id="cheek-right" cx="170" cy="180" r="20" fill="#ffceb0" opacity="0.5"/>
+    <rect id="nose" x="92" y="140" width="56" height="26" rx="16" fill="#202020"/>
+    <path id="nose-shadow" d="M104 154 Q120 164 136 154" fill="none" stroke="#000000" stroke-width="3" opacity="0.35"/>
+    <path id="mouth" d="M70 200 Q120 188 170 200" fill="none" stroke="#3d2b1f" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <g id="label" transform="translate(0 0)">
+    <rect id="label-rect" x="90" y="18" width="140" height="36" rx="18" fill="#3fa9f5" opacity="0.9"/>
+    <text id="label-text" x="160" y="43" font-size="18" text-anchor="middle" font-family="'Nunito','Segoe UI',sans-serif" fill="#04111c">Idle</text>
+  </g>
+</svg>
+"""
+
+try:
+    OFFICIAL_DOG_SVG = DOG_SVG_PATH.read_text(encoding="utf-8")
+except FileNotFoundError:
+    OFFICIAL_DOG_SVG = DOG_SVG_FALLBACK
+
+SVG_NS = "http://www.w3.org/2000/svg"
+ET.register_namespace("", SVG_NS)
 
 STYLES_CSS = """
 :root{ --bg:#0b0f14; --panel:#0f1720; --text:#e6edf3; --muted:#9fb0c0; --accent:#3fa9f5; }
@@ -557,40 +600,6 @@ DOG_VARIANTS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-DOG_SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Reactive dog mascot">
-  <rect width="320" height="320" rx="28" fill="{bg}"/>
-  <g transform="translate(40 60)">
-    <g transform="rotate({ear_left} 60 40)">
-      <path d="M14 88 Q60 4 106 66 L86 98 Z" fill="{ear}" stroke="{mask}" stroke-width="4"/>
-    </g>
-    <g transform="translate(120 0) rotate({ear_right} 60 40)">
-      <path d="M14 88 Q60 4 106 66 L86 98 Z" fill="{ear}" stroke="{mask}" stroke-width="4"/>
-    </g>
-    <ellipse cx="120" cy="160" rx="120" ry="100" fill="{body}" stroke="{mask}" stroke-width="6"/>
-    <ellipse cx="120" cy="200" rx="82" ry="60" fill="{belly}" opacity="0.95"/>
-    <g transform="rotate({tail_angle} 0 180)">
-      <path d="M-36 220 Q{tail_curve_x} {tail_curve_y} -6 130" fill="none" stroke="{tail}" stroke-width="22" stroke-linecap="round"/>
-      <circle cx="-8" cy="128" r="18" fill="{tail_tip}"/>
-    </g>
-    <ellipse cx="80" cy="{eye_y}" rx="20" ry="{eye_ry}" fill="#161616"/>
-    <ellipse cx="160" cy="{eye_y}" rx="20" ry="{eye_ry}" fill="#161616"/>
-    <circle cx="72" cy="{eye_y_minus}" r="{eye_highlight}" fill="{highlight}" opacity="{highlight_opacity}"/>
-    <circle cx="152" cy="{eye_y_minus}" r="{eye_highlight}" fill="{highlight}" opacity="{highlight_opacity}"/>
-    <circle cx="70" cy="180" r="20" fill="{cheek}" opacity="{cheek_opacity}"/>
-    <circle cx="170" cy="180" r="20" fill="{cheek}" opacity="{cheek_opacity}"/>
-    <rect x="92" y="{nose_y}" width="56" height="{nose_height}" rx="16" fill="#202020"/>
-    <path d="M104 {nose_y_plus} Q120 {nose_y_plus2} 136 {nose_y_plus}" fill="none" stroke="#000000" stroke-width="3" opacity="0.35"/>
-    <path d="M70 {mouth_y} Q120 {mouth_q} 170 {mouth_y}" fill="none" stroke="{mask}" stroke-width="6" stroke-linecap="round"/>
-  </g>
-  <g transform="translate(0 0)">
-    <rect x="90" y="18" width="140" height="36" rx="18" fill="{accent}" opacity="0.9"/>
-    <text x="160" y="43" font-size="18" text-anchor="middle" font-family="'Nunito','Segoe UI',sans-serif" fill="{label_text}">{label}</text>
-  </g>
-</svg>
-"""
-
-
 def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
 
@@ -614,38 +623,87 @@ def render_dog_svg(mode: str, activity: float) -> str:
     eye_y_minus = eye_y - (eye_ry * 0.6)
     nose_y_plus = nose_y + nose_height - 12
     nose_y_plus2 = nose_y_plus + 10
-    data = {
-        "bg": variant["bg"],
-        "body": variant["body"],
-        "belly": variant["belly"],
-        "ear": variant["ear"],
-        "mask": variant["mask"],
-        "cheek": variant["cheek"],
-        "cheek_opacity": f"{variant['cheek_opacity']:.2f}",
-        "tail": variant["tail"],
-        "tail_tip": variant["tail_tip"],
-        "accent": variant["accent"],
-        "label_text": variant["label_text"],
-        "highlight": variant["highlight"],
-        "highlight_opacity": f"{variant['highlight_opacity']:.2f}",
-        "label": variant["label"],
-        "tail_angle": f"{tail_angle:.2f}",
-        "tail_curve_x": f"{tail_curve_x:.2f}",
-        "tail_curve_y": f"{tail_curve_y:.2f}",
-        "ear_left": f"{ear_left:.2f}",
-        "ear_right": f"{ear_right:.2f}",
-        "eye_y": f"{eye_y:.2f}",
-        "eye_ry": f"{eye_ry:.2f}",
-        "eye_y_minus": f"{eye_y_minus:.2f}",
-        "eye_highlight": f"{eye_highlight:.2f}",
-        "mouth_y": f"{mouth_y:.2f}",
-        "mouth_q": f"{mouth_q:.2f}",
-        "nose_y": f"{nose_y:.2f}",
-        "nose_height": f"{nose_height:.2f}",
-        "nose_y_plus": f"{nose_y_plus:.2f}",
-        "nose_y_plus2": f"{nose_y_plus2:.2f}",
+    try:
+        template = DOG_SVG_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        template = OFFICIAL_DOG_SVG
+
+    root = ET.fromstring(template)
+
+    def find(tag: str, element_id: str) -> Optional[ET.Element]:
+        return root.find(f".//{{{SVG_NS}}}{tag}[@id='{element_id}']")
+
+    def set_attrs(element: Optional[ET.Element], **attrs: str) -> None:
+        if element is None:
+            return
+        for key, value in attrs.items():
+            element.set(key, value)
+
+    set_attrs(find("rect", "bg"), fill=variant["bg"])
+    set_attrs(find("ellipse", "body"), fill=variant["body"], stroke=variant["mask"])
+    set_attrs(find("ellipse", "belly"), fill=variant["belly"])
+    set_attrs(find("path", "ear-left"), fill=variant["ear"], stroke=variant["mask"])
+    set_attrs(find("path", "ear-right"), fill=variant["ear"], stroke=variant["mask"])
+
+    left_group = find("g", "ear-left-group")
+    if left_group is not None:
+        left_group.set("transform", f"rotate({ear_left:.2f} 60 40)")
+
+    right_group = find("g", "ear-right-group")
+    if right_group is not None:
+        right_group.set("transform", f"translate(120 0) rotate({ear_right:.2f} 60 40)")
+
+    tail_group = find("g", "tail-group")
+    if tail_group is not None:
+        tail_group.set("transform", f"rotate({tail_angle:.2f} 0 180)")
+
+    set_attrs(
+        find("path", "tail-path"),
+        d=f"M-36 220 Q{tail_curve_x:.2f} {tail_curve_y:.2f} -6 130",
+        stroke=variant["tail"],
+    )
+    set_attrs(find("circle", "tail-tip"), fill=variant["tail_tip"])
+
+    set_attrs(find("ellipse", "eye-left"), cy=f"{eye_y:.2f}", ry=f"{eye_ry:.2f}")
+    set_attrs(find("ellipse", "eye-right"), cy=f"{eye_y:.2f}", ry=f"{eye_ry:.2f}")
+
+    highlight_attrs = {
+        "cy": f"{eye_y_minus:.2f}",
+        "r": f"{eye_highlight:.2f}",
+        "fill": variant["highlight"],
+        "opacity": f"{variant['highlight_opacity']:.2f}",
     }
-    return DOG_SVG_TEMPLATE.format(**data)
+    set_attrs(find("circle", "eye-highlight-left"), **highlight_attrs)
+    set_attrs(find("circle", "eye-highlight-right"), **highlight_attrs)
+
+    cheek_attrs = {
+        "fill": variant["cheek"],
+        "opacity": f"{variant['cheek_opacity']:.2f}",
+    }
+    set_attrs(find("circle", "cheek-left"), **cheek_attrs)
+    set_attrs(find("circle", "cheek-right"), **cheek_attrs)
+
+    set_attrs(find("rect", "nose"), y=f"{nose_y:.2f}", height=f"{nose_height:.2f}")
+    set_attrs(
+        find("path", "nose-shadow"),
+        d=f"M104 {nose_y_plus:.2f} Q120 {nose_y_plus2:.2f} 136 {nose_y_plus:.2f}",
+    )
+    set_attrs(
+        find("path", "mouth"),
+        d=f"M70 {mouth_y:.2f} Q120 {mouth_q:.2f} 170 {mouth_y:.2f}",
+        stroke=variant["mask"],
+    )
+
+    set_attrs(find("rect", "label-rect"), fill=variant["accent"])
+    label_text = find("text", "label-text")
+    if label_text is not None:
+        label_text.text = variant["label"]
+        label_text.set("fill", variant["label_text"])
+
+    svg = ET.tostring(root, encoding="unicode")
+    if not svg.startswith("<?xml"):
+        svg = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + svg
+    return svg
 
 
 PLACEHOLDER_JPEG = (
@@ -669,6 +727,7 @@ def ensure_web_assets() -> None:
     _write_asset(WEB_DIR / "index.html", INDEX_HTML)
     _write_asset(STATIC_DIR / "app.js", APP_JS)
     _write_asset(STATIC_DIR / "styles.css", STYLES_CSS)
+    _write_asset(DOG_SVG_PATH, OFFICIAL_DOG_SVG)
 
 
 def build_status_payload() -> Dict[str, Any]:
