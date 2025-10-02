@@ -1,0 +1,40 @@
+
+:root{ --bg:#0b0f14; --panel:#0f1720; --text:#e6edf3; --muted:#9fb0c0; --accent:#3fa9f5; }
+*{ box-sizing:border-box; }
+html,body{ margin:0; height:100%; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Ubuntu, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; }
+.topbar{ display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#0c131b; position:sticky; top:0; z-index:10; box-shadow:0 2px 8px rgba(0,0,0,.3) }
+.brand{ font-weight:700; letter-spacing:.3px }
+.clock{ color:var(--muted); font-variant-numeric:tabular-nums }
+.grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; padding:12px; }
+.panel{ background:var(--panel); border:1px solid #152033; border-radius:14px; padding:12px; box-shadow:0 6px 20px rgba(0,0,0,.25); }
+.corgi-panel{ grid-column: span 4; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.corgi-panel img{ width:100%; max-width:280px; transition: transform .4s ease; filter: drop-shadow(0 10px 25px rgba(0,0,0,.35)); }
+.corgi-panel img.idle{ transform: translateY(0px); }
+.corgi-panel img.focus{ transform: translateY(-6px) scale(1.02); }
+.corgi-panel img.break{ transform: translateY(2px) scale(.98); filter: grayscale(.2) brightness(.9); }
+.corgi-panel img.alert{ animation: wiggle .18s ease-in-out 0s 8 alternate; }
+@keyframes wiggle{ from{ transform: rotate(-6deg)} to{ transform: rotate(6deg)} }
+.corgi-panel .mode{ margin-top:8px; color:var(--muted) }
+
+.measures{ grid-column: span 3; }
+.measures h3{ margin:2px 0 10px }
+.measure{ display:flex; align-items:baseline; gap:6px; margin:4px 0 }
+.measure b{ font-size:1.3rem }
+.availability{ margin-top:6px; color:var(--muted) }
+
+.camera{ grid-column: span 5; }
+.camera img{ width:100%; border-radius:10px; border:1px solid #1b2940 }
+
+.motion{ grid-column: span 12; }
+.motion pre{ white-space: pre-wrap; max-height: 260px; overflow:auto; color:#cfe3ff; background:#0b1220; padding:10px; border-radius:10px; border:1px solid #152033 }
+
+.foot{ text-align:center; color:var(--muted); padding:8px 0 16px }
+
+/* Compact mode: when small, show only corgi + measures */
+@media (max-width: 680px){
+  .grid{ grid-template-columns: repeat(4, 1fr); }
+  .camera{ display:none }
+  .motion{ display:none }
+  .corgi-panel{ grid-column: span 4; }
+  .measures{ grid-column: span 4; }
+}

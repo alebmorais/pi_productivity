@@ -40,7 +40,10 @@ from __future__ import annotations
 import asyncio
 import os
 import io
-import cv2  # type: ignore
+try:
+    import cv2  # type: ignore
+except Exception:  # noqa: BLE001
+    cv2 = None  # type: ignore
 import json
 import time
 import enum
@@ -146,6 +149,9 @@ class Camera:
         self._open()
 
     def _open(self):
+        if cv2 is None:
+            self.cap = None
+            return
         try:
             self.cap = cv2.VideoCapture(self.index)
             if not self.cap or not self.cap.isOpened():
@@ -154,6 +160,8 @@ class Camera:
             self.cap = None
 
     def read_jpeg(self) -> Optional[bytes]:
+        if cv2 is None:
+            return None
         with self.lock:
             if not self.cap:
                 self._open()
@@ -317,9 +325,31 @@ const motionEl = document.getElementById('motion');
 const modeEl = document.getElementById('mode');
 const corgi = document.getElementById('corgi');
 
+function isPresent(value){
+  return value !== undefined && value !== null;
+}
+
+function ensureObject(value){
+  return value !== undefined && value !== null && typeof value === 'object' ? value : {};
+}
+
+function ensureArray(value){
+  return Array.isArray(value) ? value : [];
+}
+
+function hasOwn(obj, prop){
+  return Object.prototype.hasOwnProperty.call(obj, prop);
+}
+
+function formatReading(value){
+  return isPresent(value) && typeof value.toFixed === 'function' ? value.toFixed(1) : '--';
+}
+
 function dogUrl(state, activity){
-  const mode = encodeURIComponent(state ?? 'idle');
-  let act = Number(activity ?? 0);
+  const modeValue = state !== undefined && state !== null ? state : 'idle';
+  const mode = encodeURIComponent(modeValue);
+  const activityValue = activity !== undefined && activity !== null ? activity : 0;
+  let act = Number(activityValue);
   if(!Number.isFinite(act)){ act = 0; }
   act = Math.max(0, Math.min(1, act));
   const ts = Date.now();
@@ -334,7 +364,7 @@ setInterval(tickClock, 500);
 
 function setCorgi(state, activity){
   // swap CSS class to animate different states
-  const next = (state || 'idle');
+  const next = isPresent(state) ? state : 'idle';
   corgi.classList.remove('idle','focus','break','alert');
   corgi.classList.add(next);
   corgi.src = dogUrl(next, activity);
@@ -345,16 +375,24 @@ async function refreshOnce(){
   try{
     const r = await fetch('/api/status');
     const j = await r.json();
-    const s = j.sense;
-    tempEl.textContent = s.temperature?.toFixed?.(1) ?? '--';
-    humEl.textContent = s.humidity?.toFixed?.(1) ?? '--';
-    presEl.textContent = s.pressure?.toFixed?.(1) ?? '--';
-    senseAvail.textContent = s.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-    motionEl.textContent = (j.motion||[]).slice(-50).join('\n');
-    modeEl.textContent = 'Mode: ' + j.mode;
+    const status = ensureObject(j);
+    const sense = ensureObject(status.sense);
+    tempEl.textContent = formatReading(sense.temperature);
+    humEl.textContent = formatReading(sense.humidity);
+    presEl.textContent = formatReading(sense.pressure);
+    senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
+    const motionValue = ensureArray(status.motion);
+    motionEl.textContent = motionValue.slice(-50).join('\\n');
+    const modeValue = hasOwn(status, 'mode') ? status.mode : undefined;
+    const displaySource = isPresent(modeValue) ? modeValue : '--';
+    const modeLabel = typeof displaySource === 'string' ? displaySource : String(displaySource);
+    modeEl.textContent = 'Mode: ' + modeLabel;
 
-    const state = (j.mode||'IDLE').toLowerCase();
-    const activity = j.activity_level ?? 0;
+    const rawModeSource = isPresent(modeValue) ? modeValue : 'IDLE';
+    const rawModeString = typeof rawModeSource === 'string' ? rawModeSource : String(rawModeSource);
+    const state = rawModeString.toLowerCase();
+    const activityCandidate = hasOwn(status, 'activity_level') ? status.activity_level : undefined;
+    const activity = isPresent(activityCandidate) ? activityCandidate : 0;
     setCorgi(state, activity);
   }catch(e){
     console.error(e);
@@ -366,16 +404,25 @@ async function initWS(){
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
     ws.onmessage = (ev)=>{
       const j = JSON.parse(ev.data);
-      if(j.kind==='tick'){
-        const s = j.payload;
-        tempEl.textContent = s.sense.temperature?.toFixed?.(1) ?? '--';
-        humEl.textContent = s.sense.humidity?.toFixed?.(1) ?? '--';
-        presEl.textContent = s.sense.pressure?.toFixed?.(1) ?? '--';
-        senseAvail.textContent = s.sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-        motionEl.textContent = (s.motion||[]).slice(-50).join('\n');
-        modeEl.textContent = 'Mode: ' + s.mode;
-        const activity = s.activity_level ?? 0;
-        setCorgi((s.mode||'IDLE').toLowerCase(), activity);
+      const message = ensureObject(j);
+      if(message.kind==='tick'){
+        const payload = ensureObject(message.payload);
+        const sense = ensureObject(payload.sense);
+        tempEl.textContent = formatReading(sense.temperature);
+        humEl.textContent = formatReading(sense.humidity);
+        presEl.textContent = formatReading(sense.pressure);
+        senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
+        const motionValue = ensureArray(payload.motion);
+        motionEl.textContent = motionValue.slice(-50).join('\\n');
+        const modeValue = hasOwn(payload, 'mode') ? payload.mode : undefined;
+        const displaySource = isPresent(modeValue) ? modeValue : '--';
+        const modeLabel = typeof displaySource === 'string' ? displaySource : String(displaySource);
+        modeEl.textContent = 'Mode: ' + modeLabel;
+        const rawModeSource = isPresent(modeValue) ? modeValue : 'IDLE';
+        const modeString = typeof rawModeSource === 'string' ? rawModeSource : String(rawModeSource);
+        const activityCandidate = hasOwn(payload, 'activity_level') ? payload.activity_level : undefined;
+        const activity = isPresent(activityCandidate) ? activityCandidate : 0;
+        setCorgi(modeString.toLowerCase(), activity);
       }
     };
     ws.onclose = ()=> setTimeout(initWS, 2000);
