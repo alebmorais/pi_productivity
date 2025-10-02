@@ -83,7 +83,9 @@ class App:
         self.posture_adjust_count = 0
         self.posture_session_start = time.time()
         self.tasks_completed_today = 0
-        self._tasks_completed_date = time.strftime("%Y-%m-%d")
+        today = time.strftime("%Y-%m-%d")
+        self._tasks_completed_date = today
+        self._posture_adjust_date = today
 
         # Clients / features
         self.motion = None
@@ -177,6 +179,12 @@ class App:
             self._tasks_completed_date = today
             self.tasks_completed_today = 0
 
+    def _maybe_reset_posture_counter(self):
+        today = time.strftime("%Y-%m-%d")
+        if today != self._posture_adjust_date:
+            self._posture_adjust_date = today
+            self.posture_adjust_count = 0
+
     def _log_task_event(self, action, section_title, task_name):
         self._maybe_reset_completed_counter()
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -201,6 +209,7 @@ class App:
             print("[PostureLog] erro:", e)
 
     def _log_posture_csv(self, status):
+        self._maybe_reset_posture_counter()
         self._maybe_reset_completed_counter()
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
         row = [
@@ -231,6 +240,7 @@ class App:
             
     def run_posture_once(self):
         from sense_mode import RED, GREEN
+        self._maybe_reset_posture_counter()
         self._ensure_camera()
         status = {}
         frame = None
@@ -238,6 +248,8 @@ class App:
             with self._cam_lock:
                 frame = self.cam.capture_array()
                 status = self.posture.analyze_frame(frame)
+                if not status.get("ok"):
+                    self.posture_adjust_count += 1
                 try:
                     import cv2
                     cv2.imwrite(os.path.join(BASE_DIR, "last_posture.jpg"), frame)
