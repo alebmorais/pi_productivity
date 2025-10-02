@@ -374,25 +374,11 @@ function setCorgi(state, activity){
 async function refreshOnce(){
   try{
     const r = await fetch('/api/status');
+    if(!r.ok){
+      console.error('Status fetch failed', r.status, r.statusText);
+      return;
+    }
     const j = await r.json();
-    const status = ensureObject(j);
-    const sense = ensureObject(status.sense);
-    tempEl.textContent = formatReading(sense.temperature);
-    humEl.textContent = formatReading(sense.humidity);
-    presEl.textContent = formatReading(sense.pressure);
-    senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-    const motionValue = ensureArray(status.motion);
-    motionEl.textContent = motionValue.slice(-50).join('\\n');
-    const modeValue = hasOwn(status, 'mode') ? status.mode : undefined;
-    const displaySource = isPresent(modeValue) ? modeValue : '--';
-    const modeLabel = typeof displaySource === 'string' ? displaySource : String(displaySource);
-    modeEl.textContent = 'Mode: ' + modeLabel;
-
-    const rawModeSource = isPresent(modeValue) ? modeValue : 'IDLE';
-    const rawModeString = typeof rawModeSource === 'string' ? rawModeSource : String(rawModeSource);
-    const state = rawModeString.toLowerCase();
-    const activityCandidate = hasOwn(status, 'activity_level') ? status.activity_level : undefined;
-    const activity = isPresent(activityCandidate) ? activityCandidate : 0;
     setCorgi(state, activity);
   }catch(e){
     console.error(e);
@@ -404,25 +390,6 @@ async function initWS(){
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
     ws.onmessage = (ev)=>{
       const j = JSON.parse(ev.data);
-      const message = ensureObject(j);
-      if(message.kind==='tick'){
-        const payload = ensureObject(message.payload);
-        const sense = ensureObject(payload.sense);
-        tempEl.textContent = formatReading(sense.temperature);
-        humEl.textContent = formatReading(sense.humidity);
-        presEl.textContent = formatReading(sense.pressure);
-        senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-        const motionValue = ensureArray(payload.motion);
-        motionEl.textContent = motionValue.slice(-50).join('\\n');
-        const modeValue = hasOwn(payload, 'mode') ? payload.mode : undefined;
-        const displaySource = isPresent(modeValue) ? modeValue : '--';
-        const modeLabel = typeof displaySource === 'string' ? displaySource : String(displaySource);
-        modeEl.textContent = 'Mode: ' + modeLabel;
-        const rawModeSource = isPresent(modeValue) ? modeValue : 'IDLE';
-        const modeString = typeof rawModeSource === 'string' ? rawModeSource : String(rawModeSource);
-        const activityCandidate = hasOwn(payload, 'activity_level') ? payload.activity_level : undefined;
-        const activity = isPresent(activityCandidate) ? activityCandidate : 0;
-        setCorgi(modeString.toLowerCase(), activity);
       }
     };
     ws.onclose = ()=> setTimeout(initWS, 2000);
