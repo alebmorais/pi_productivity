@@ -317,6 +317,26 @@ const motionEl = document.getElementById('motion');
 const modeEl = document.getElementById('mode');
 const corgi = document.getElementById('corgi');
 
+function isPresent(value){
+  return value !== undefined && value !== null;
+}
+
+function ensureObject(value){
+  return value !== undefined && value !== null && typeof value === 'object' ? value : {};
+}
+
+function ensureArray(value){
+  return Array.isArray(value) ? value : [];
+}
+
+function hasOwn(obj, prop){
+  return Object.prototype.hasOwnProperty.call(obj, prop);
+}
+
+function formatReading(value){
+  return isPresent(value) && typeof value.toFixed === 'function' ? value.toFixed(1) : '--';
+}
+
 function dogUrl(state, activity){
   const modeValue = state !== undefined && state !== null ? state : 'idle';
   const mode = encodeURIComponent(modeValue);
@@ -336,7 +356,7 @@ setInterval(tickClock, 500);
 
 function setCorgi(state, activity){
   // swap CSS class to animate different states
-  const next = (state || 'idle');
+  const next = isPresent(state) ? state : 'idle';
   corgi.classList.remove('idle','focus','break','alert');
   corgi.classList.add(next);
   corgi.src = dogUrl(next, activity);
@@ -347,22 +367,22 @@ async function refreshOnce(){
   try{
     const r = await fetch('/api/status');
     const j = await r.json();
-    const s = j && j.sense ? j.sense : {};
-    const tempValue = s.temperature;
-    const humValue = s.humidity;
-    const presValue = s.pressure;
-    tempEl.textContent = tempValue !== undefined && tempValue !== null && tempValue.toFixed ? tempValue.toFixed(1) : '--';
-    humEl.textContent = humValue !== undefined && humValue !== null && humValue.toFixed ? humValue.toFixed(1) : '--';
-    presEl.textContent = presValue !== undefined && presValue !== null && presValue.toFixed ? presValue.toFixed(1) : '--';
-    senseAvail.textContent = s.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-    const motionValue = j && j.motion ? j.motion : [];
+    const status = ensureObject(j);
+    const sense = ensureObject(status.sense);
+    tempEl.textContent = formatReading(sense.temperature);
+    humEl.textContent = formatReading(sense.humidity);
+    presEl.textContent = formatReading(sense.pressure);
+    senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
+    const motionValue = ensureArray(status.motion);
     motionEl.textContent = motionValue.slice(-50).join('\\n');
-    const modeText = j && Object.prototype.hasOwnProperty.call(j, 'mode') ? j.mode : undefined;
+    const modeText = hasOwn(status, 'mode') ? status.mode : undefined;
     modeEl.textContent = 'Mode: ' + modeText;
 
-    const rawMode = j && j.mode ? j.mode : 'IDLE';
-    const state = rawMode.toLowerCase();
-    const activity = j && j.activity_level !== undefined && j.activity_level !== null ? j.activity_level : 0;
+    const rawModeCandidate = status.mode;
+    const rawMode = rawModeCandidate ? rawModeCandidate : 'IDLE';
+    const state = typeof rawMode === 'string' ? rawMode.toLowerCase() : String(rawMode).toLowerCase();
+    const activityCandidate = hasOwn(status, 'activity_level') ? status.activity_level : undefined;
+    const activity = isPresent(activityCandidate) ? activityCandidate : 0;
     setCorgi(state, activity);
   }catch(e){
     console.error(e);
@@ -374,23 +394,24 @@ async function initWS(){
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
     ws.onmessage = (ev)=>{
       const j = JSON.parse(ev.data);
-      if(j && j.kind==='tick'){
-        const s = j.payload ? j.payload : {};
-        const sense = s && s.sense ? s.sense : {};
-        const tempValue = sense.temperature;
-        const humValue = sense.humidity;
-        const presValue = sense.pressure;
-        tempEl.textContent = tempValue !== undefined && tempValue !== null && tempValue.toFixed ? tempValue.toFixed(1) : '--';
-        humEl.textContent = humValue !== undefined && humValue !== null && humValue.toFixed ? humValue.toFixed(1) : '--';
-        presEl.textContent = presValue !== undefined && presValue !== null && presValue.toFixed ? presValue.toFixed(1) : '--';
+      const message = ensureObject(j);
+      if(message.kind==='tick'){
+        const payload = ensureObject(message.payload);
+        const sense = ensureObject(payload.sense);
+        tempEl.textContent = formatReading(sense.temperature);
+        humEl.textContent = formatReading(sense.humidity);
+        presEl.textContent = formatReading(sense.pressure);
         senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-        const motionValue = s && s.motion ? s.motion : [];
+        const motionValue = ensureArray(payload.motion);
         motionEl.textContent = motionValue.slice(-50).join('\\n');
-        const modeText = s && Object.prototype.hasOwnProperty.call(s, 'mode') ? s.mode : undefined;
+        const modeText = hasOwn(payload, 'mode') ? payload.mode : undefined;
         modeEl.textContent = 'Mode: ' + modeText;
-        const modeRaw = s && s.mode ? s.mode : 'IDLE';
-        const activity = s && s.activity_level !== undefined && s.activity_level !== null ? s.activity_level : 0;
-        setCorgi(modeRaw.toLowerCase(), activity);
+        const modeRawCandidate = payload.mode;
+        const modeRaw = modeRawCandidate ? modeRawCandidate : 'IDLE';
+        const modeString = typeof modeRaw === 'string' ? modeRaw : String(modeRaw);
+        const activityCandidate = hasOwn(payload, 'activity_level') ? payload.activity_level : undefined;
+        const activity = isPresent(activityCandidate) ? activityCandidate : 0;
+        setCorgi(modeString.toLowerCase(), activity);
       }
     };
     ws.onclose = ()=> setTimeout(initWS, 2000);
