@@ -1,0 +1,19 @@
+# Segredos e configs locais
+.env
+*.env
+.env.*
+!.env.example
+
+# Bancos de dados
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache/artefatos
+__pycache__/
+*.py[cod]
+*.log
+
+# Virtualenv (ajuste se o nome for diferente)
+.venv/
+venv/
