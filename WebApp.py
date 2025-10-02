@@ -41,7 +41,13 @@ import asyncio
 import os
 import io
 import csv
-import cv2  # type: ignore
+try:
+    import cv2  # type: ignore
+except Exception as exc:  # noqa: BLE001
+    cv2 = None  # type: ignore[assignment]
+    CV2_IMPORT_ERROR = str(exc)
+else:
+    CV2_IMPORT_ERROR = None
 import json
 import time
 import enum
@@ -148,6 +154,10 @@ class Camera:
         self._open()
 
     def _open(self):
+        if cv2 is None:
+            self.cap = None
+            return
+
         try:
             self.cap = cv2.VideoCapture(self.index)
             if not self.cap or not self.cap.isOpened():
@@ -157,6 +167,9 @@ class Camera:
 
     def read_jpeg(self) -> Optional[bytes]:
         with self.lock:
+            if cv2 is None:
+                return None
+
             if not self.cap:
                 self._open()
                 if not self.cap:
