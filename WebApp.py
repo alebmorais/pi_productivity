@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import os
 import io
+import csv
 import cv2  # type: ignore
 import json
 import time
@@ -62,6 +63,7 @@ WEB_DIR = Path(__file__).parent / "web"
 TEMPLATES_DIR = WEB_DIR
 STATIC_DIR = WEB_DIR / "static"
 MOTION_LOG = Path("/var/log/motion/motion.log")  # adjust if needed
+POSTURE_EVENTS_CSV = Path.home() / "pi_productivity" / "logs" / "posture_events.csv"
 PORT = int(os.getenv("WEBAPP_PORT", "8090"))
 HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
 
@@ -211,6 +213,58 @@ class MotionTailer:
             # Keep quiet; UI will just show nothing
             pass
 
+# ---------------- Posture helpers ----------------
+def read_posture_adjustments_today(csv_path: Path = POSTURE_EVENTS_CSV) -> int:
+    """Return today's posture adjustments count from the CSV log."""
+
+    path = Path(csv_path).expanduser()
+    today = datetime.now().date()
+    count = 0
+    if not path.exists():
+        return 0
+
+    try:
+        with path.open("r", newline="", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            for row in reader:
+                if len(row) < 2:
+                    continue
+
+                timestamp_raw = (row[0] or "").strip()
+                if not timestamp_raw:
+                    continue
+
+                date_fragment = timestamp_raw.split("T")[0].split(" ")[0]
+                try:
+                    row_date = datetime.strptime(date_fragment, "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+
+                if row_date != today:
+                    continue
+
+                ok_raw = (row[1] or "").strip()
+                try:
+                    ok_value = int(float(ok_raw))
+                except ValueError:
+                    ok_lower = ok_raw.lower()
+                    if ok_lower in {"false", "no", "n"}:
+                        ok_value = 0
+                    elif ok_lower in {"true", "yes", "y"}:
+                        ok_value = 1
+                    else:
+                        continue
+
+                if ok_value == 0:
+                    count += 1
+    except FileNotFoundError:
+        return 0
+    except Exception:
+        # If parsing fails midway, return what we have so far.
+        pass
+
+    return count
+
 # ---------------- App state & broadcaster ----------------
 class Broadcaster:
     def __init__(self):
@@ -287,6 +341,7 @@ INDEX_HTML = """<!DOCTYPE html>
       <div class="measure"><span>Temp</span><b id="temp">--</b><span>°C</span></div>
       <div class="measure"><span>Humidity</span><b id="hum">--</b><span>%</span></div>
       <div class="measure"><span>Pressure</span><b id="pres">--</b><span>hPa</span></div>
+      <div class="measure"><span>Posture</span><b id="postureAdjust">--</b><span>today</span></div>
       <div class="availability" id="senseAvail"></div>
     </section>
 
@@ -316,6 +371,7 @@ const senseAvail = document.getElementById('senseAvail');
 const motionEl = document.getElementById('motion');
 const modeEl = document.getElementById('mode');
 const corgi = document.getElementById('corgi');
+const postureAdjustEl = document.getElementById('postureAdjust');
 
 function dogUrl(state, activity){
   const mode = encodeURIComponent(state ?? 'idle');
@@ -341,6 +397,16 @@ function setCorgi(state, activity){
   corgi.dataset.mode = next;
 }
 
+function updatePostureAdjustments(value){
+  if(!postureAdjustEl){ return; }
+  const num = Number(value);
+  if(Number.isFinite(num) && num >= 0){
+    postureAdjustEl.textContent = String(Math.round(num));
+  }else{
+    postureAdjustEl.textContent = '--';
+  }
+}
+
 async function refreshOnce(){
   try{
     const r = await fetch('/api/status');
@@ -352,6 +418,7 @@ async function refreshOnce(){
     senseAvail.textContent = s.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
     motionEl.textContent = (j.motion||[]).slice(-50).join('\n');
     modeEl.textContent = 'Mode: ' + j.mode;
+    updatePostureAdjustments(j.posture_adjustments_today);
 
     const state = (j.mode||'IDLE').toLowerCase();
     const activity = j.activity_level ?? 0;
@@ -375,6 +442,7 @@ async function initWS(){
         motionEl.textContent = (s.motion||[]).slice(-50).join('\n');
         modeEl.textContent = 'Mode: ' + s.mode;
         const activity = s.activity_level ?? 0;
+        updatePostureAdjustments(s.posture_adjustments_today);
         setCorgi((s.mode||'IDLE').toLowerCase(), activity);
       }
     };
@@ -410,6 +478,7 @@ html,body{ margin:0; height:100%; background:var(--bg); color:var(--text); font-
 .measures h3{ margin:2px 0 10px }
 .measure{ display:flex; align-items:baseline; gap:6px; margin:4px 0 }
 .measure b{ font-size:1.3rem }
+#postureAdjust{ font-variant-numeric: tabular-nums; }
 .availability{ margin-top:6px; color:var(--muted) }
 
 .camera{ grid-column: span 5; }
@@ -680,6 +749,7 @@ def build_status_payload() -> Dict[str, Any]:
         "sense": sense.readings(),
         "motion": recent_motion,
         "activity_level": round(activity, 2),
+        "posture_adjustments_today": read_posture_adjustments_today(),
         "timestamp": datetime.utcnow().isoformat(),
     }
 
