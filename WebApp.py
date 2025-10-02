@@ -52,6 +52,7 @@ from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, List
+from xml.etree import ElementTree as ET
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
@@ -571,35 +572,41 @@ DOG_VARIANTS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-DOG_SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Reactive dog mascot">
-  <rect width="320" height="320" rx="28" fill="{bg}"/>
-  <g transform="translate(40 60)">
-    <g transform="rotate({ear_left} 60 40)">
-      <path d="M14 88 Q60 4 106 66 L86 98 Z" fill="{ear}" stroke="{mask}" stroke-width="4"/>
-    </g>
-    <g transform="translate(120 0) rotate({ear_right} 60 40)">
-      <path d="M14 88 Q60 4 106 66 L86 98 Z" fill="{ear}" stroke="{mask}" stroke-width="4"/>
-    </g>
-    <ellipse cx="120" cy="160" rx="120" ry="100" fill="{body}" stroke="{mask}" stroke-width="6"/>
-    <ellipse cx="120" cy="200" rx="82" ry="60" fill="{belly}" opacity="0.95"/>
-    <g transform="rotate({tail_angle} 0 180)">
-      <path d="M-36 220 Q{tail_curve_x} {tail_curve_y} -6 130" fill="none" stroke="{tail}" stroke-width="22" stroke-linecap="round"/>
-      <circle cx="-8" cy="128" r="18" fill="{tail_tip}"/>
-    </g>
-    <ellipse cx="80" cy="{eye_y}" rx="20" ry="{eye_ry}" fill="#161616"/>
-    <ellipse cx="160" cy="{eye_y}" rx="20" ry="{eye_ry}" fill="#161616"/>
-    <circle cx="72" cy="{eye_y_minus}" r="{eye_highlight}" fill="{highlight}" opacity="{highlight_opacity}"/>
-    <circle cx="152" cy="{eye_y_minus}" r="{eye_highlight}" fill="{highlight}" opacity="{highlight_opacity}"/>
-    <circle cx="70" cy="180" r="20" fill="{cheek}" opacity="{cheek_opacity}"/>
-    <circle cx="170" cy="180" r="20" fill="{cheek}" opacity="{cheek_opacity}"/>
-    <rect x="92" y="{nose_y}" width="56" height="{nose_height}" rx="16" fill="#202020"/>
-    <path d="M104 {nose_y_plus} Q120 {nose_y_plus2} 136 {nose_y_plus}" fill="none" stroke="#000000" stroke-width="3" opacity="0.35"/>
-    <path d="M70 {mouth_y} Q120 {mouth_q} 170 {mouth_y}" fill="none" stroke="{mask}" stroke-width="6" stroke-linecap="round"/>
+SVG_NS = "http://www.w3.org/2000/svg"
+ET.register_namespace("", SVG_NS)
+
+DOG_SVG_FALLBACK = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 320\" role=\"img\" aria-label=\"Reactive dog mascot\">
+  <rect id=\"frame\" width=\"320\" height=\"320\" rx=\"28\" fill=\"#0f1720\"/>
+  <g id=\"badge\">
+    <rect id=\"label-banner\" x=\"92\" y=\"18\" width=\"136\" height=\"36\" rx=\"18\" fill=\"#3fa9f5\" opacity=\"0.92\"/>
+    <text id=\"mode-label\" x=\"160\" y=\"43\" text-anchor=\"middle\" font-size=\"18\" font-family=\"'Nunito','Segoe UI',sans-serif\" fill=\"#04111c\">Idle</text>
   </g>
-  <g transform="translate(0 0)">
-    <rect x="90" y="18" width="140" height="36" rx="18" fill="{accent}" opacity="0.9"/>
-    <text x="160" y="43" font-size="18" text-anchor="middle" font-family="'Nunito','Segoe UI',sans-serif" fill="{label_text}">{label}</text>
+  <g id=\"dog\" transform=\"translate(36 52)\">
+    <g id=\"tail-group\" transform=\"rotate(-12 22 188)\">
+      <path id=\"tail\" d=\"M22 188 Q-60 140 6 108\" fill=\"none\" stroke=\"#f7b37f\" stroke-width=\"22\" stroke-linecap=\"round\"/>
+      <circle id=\"tail-tip\" cx=\"8\" cy=\"106\" r=\"18\" fill=\"#fff4e6\"/>
+    </g>
+    <path id=\"body\" d=\"M48 64 Q8 120 14 188 C20 248 70 280 124 280 C178 280 228 248 234 188 C240 120 200 64 160 64 L124 64 Z\" fill=\"#f7b37f\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linejoin=\"round\"/>
+    <path id=\"belly\" d=\"M80 186 C80 150 110 134 124 134 C138 134 168 150 168 186 C168 224 138 244 124 244 C110 244 80 224 80 186 Z\" fill=\"#fff4e6\" opacity=\"0.95\"/>
+    <g id=\"ear-left\" transform=\"rotate(0 76 46)\">
+      <path id=\"ear-left-shape\" d=\"M36 108 Q74 0 116 46 L102 120 Z\" fill=\"#ffd8b3\" stroke=\"#3d2b1f\" stroke-width=\"5\" stroke-linejoin=\"round\"/>
+    </g>
+    <g id=\"ear-right\" transform=\"rotate(0 172 46)\">
+      <path id=\"ear-right-shape\" d=\"M132 120 L118 46 Q160 0 204 108 Z\" fill=\"#ffd8b3\" stroke=\"#3d2b1f\" stroke-width=\"5\" stroke-linejoin=\"round\"/>
+    </g>
+    <path id=\"mask\" d=\"M28 142 C20 88 60 56 96 56 L152 56 C188 56 228 88 220 142 C214 182 180 214 124 214 C68 214 34 182 28 142 Z\" fill=\"#ffd8b3\"/>
+    <ellipse id=\"eye-left\" cx=\"88\" cy=\"110\" rx=\"20\" ry=\"14\" fill=\"#161616\"/>
+    <ellipse id=\"eye-right\" cx=\"160\" cy=\"110\" rx=\"20\" ry=\"14\" fill=\"#161616\"/>
+    <circle id=\"eye-highlight-left\" cx=\"76\" cy=\"102\" r=\"7\" fill=\"#ffffff\" opacity=\"0.6\"/>
+    <circle id=\"eye-highlight-right\" cx=\"148\" cy=\"102\" r=\"7\" fill=\"#ffffff\" opacity=\"0.6\"/>
+    <circle id=\"cheek-left\" cx=\"70\" cy=\"180\" r=\"20\" fill=\"#ffceb0\" opacity=\"0.50\"/>
+    <circle id=\"cheek-right\" cx=\"178\" cy=\"180\" r=\"20\" fill=\"#ffceb0\" opacity=\"0.50\"/>
+    <rect id=\"nose\" x=\"108\" y=\"140\" width=\"52\" height=\"26\" rx=\"14\" fill=\"#3d2b1f\"/>
+    <path id=\"nose-shine\" d=\"M114 154 Q134 164 150 154\" fill=\"none\" stroke=\"#000000\" stroke-width=\"3\" opacity=\"0.35\" stroke-linecap=\"round\"/>
+    <path id=\"mouth\" d=\"M74 200 Q124 188 174 200\" fill=\"none\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linecap=\"round\"/>
+    <path id=\"paw-left\" d=\"M64 238 C62 256 80 266 94 260\" fill=\"none\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linecap=\"round\" opacity=\"0.35\"/>
+    <path id=\"paw-right\" d=\"M182 260 C196 266 214 256 212 238\" fill=\"none\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linecap=\"round\" opacity=\"0.35\"/>
   </g>
 </svg>
 """
@@ -628,38 +635,75 @@ def render_dog_svg(mode: str, activity: float) -> str:
     eye_y_minus = eye_y - (eye_ry * 0.6)
     nose_y_plus = nose_y + nose_height - 12
     nose_y_plus2 = nose_y_plus + 10
-    data = {
-        "bg": variant["bg"],
-        "body": variant["body"],
-        "belly": variant["belly"],
-        "ear": variant["ear"],
-        "mask": variant["mask"],
-        "cheek": variant["cheek"],
-        "cheek_opacity": f"{variant['cheek_opacity']:.2f}",
-        "tail": variant["tail"],
-        "tail_tip": variant["tail_tip"],
-        "accent": variant["accent"],
-        "label_text": variant["label_text"],
-        "highlight": variant["highlight"],
-        "highlight_opacity": f"{variant['highlight_opacity']:.2f}",
-        "label": variant["label"],
-        "tail_angle": f"{tail_angle:.2f}",
-        "tail_curve_x": f"{tail_curve_x:.2f}",
-        "tail_curve_y": f"{tail_curve_y:.2f}",
-        "ear_left": f"{ear_left:.2f}",
-        "ear_right": f"{ear_right:.2f}",
-        "eye_y": f"{eye_y:.2f}",
-        "eye_ry": f"{eye_ry:.2f}",
-        "eye_y_minus": f"{eye_y_minus:.2f}",
-        "eye_highlight": f"{eye_highlight:.2f}",
-        "mouth_y": f"{mouth_y:.2f}",
-        "mouth_q": f"{mouth_q:.2f}",
-        "nose_y": f"{nose_y:.2f}",
-        "nose_height": f"{nose_height:.2f}",
-        "nose_y_plus": f"{nose_y_plus:.2f}",
-        "nose_y_plus2": f"{nose_y_plus2:.2f}",
-    }
-    return DOG_SVG_TEMPLATE.format(**data)
+
+    root = ET.fromstring(DOG_SVG_FALLBACK)
+
+    def set_attrs(element_id: str, **attrs: str) -> Optional[ET.Element]:
+        element = root.find(f".//*[@id='{element_id}']")
+        if element is not None:
+            for key, value in attrs.items():
+                element.set(key, value)
+        return element
+
+    set_attrs("frame", fill=variant["bg"])
+    set_attrs("label-banner", fill=variant["accent"])
+    label = set_attrs("mode-label", fill=variant["label_text"])
+    if label is not None:
+        label.text = variant["label"]
+
+    set_attrs("body", fill=variant["body"], stroke=variant["mask"])
+    set_attrs("belly", fill=variant["belly"])
+    set_attrs("mask", fill=variant["ear"])
+    set_attrs("ear-left-shape", fill=variant["ear"], stroke=variant["mask"])
+    set_attrs("ear-right-shape", fill=variant["ear"], stroke=variant["mask"])
+    set_attrs("tail", stroke=variant["tail"])
+    set_attrs("tail-tip", fill=variant["tail_tip"])
+    set_attrs("cheek-left", fill=variant["cheek"], opacity=f"{variant['cheek_opacity']:.2f}")
+    set_attrs("cheek-right", fill=variant["cheek"], opacity=f"{variant['cheek_opacity']:.2f}")
+    set_attrs("mouth", stroke=variant["mask"])
+    set_attrs("paw-left", stroke=variant["mask"])
+    set_attrs("paw-right", stroke=variant["mask"])
+
+    set_attrs("tail-group", transform=f"rotate({tail_angle:.2f} 22 188)")
+    set_attrs("ear-left", transform=f"rotate({ear_left:.2f} 76 46)")
+    set_attrs("ear-right", transform=f"rotate({ear_right:.2f} 172 46)")
+
+    set_attrs("eye-left", cy=f"{eye_y:.2f}", ry=f"{eye_ry:.2f}")
+    set_attrs("eye-right", cy=f"{eye_y:.2f}", ry=f"{eye_ry:.2f}")
+    set_attrs(
+        "eye-highlight-left",
+        cy=f"{eye_y_minus:.2f}",
+        r=f"{eye_highlight:.2f}",
+        fill=variant["highlight"],
+        opacity=f"{variant['highlight_opacity']:.2f}",
+    )
+    set_attrs(
+        "eye-highlight-right",
+        cy=f"{eye_y_minus:.2f}",
+        r=f"{eye_highlight:.2f}",
+        fill=variant["highlight"],
+        opacity=f"{variant['highlight_opacity']:.2f}",
+    )
+
+    set_attrs("nose", y=f"{nose_y:.2f}", height=f"{nose_height:.2f}", fill=variant["mask"])
+    set_attrs(
+        "nose-shine",
+        d=f"M114 {nose_y_plus:.2f} Q134 {nose_y_plus2:.2f} 150 {nose_y_plus:.2f}",
+        stroke="#000000",
+    )
+    set_attrs(
+        "mouth",
+        d=f"M74 {mouth_y:.2f} Q124 {mouth_q:.2f} 174 {mouth_y:.2f}",
+    )
+    set_attrs(
+        "tail",
+        d=f"M22 188 Q{tail_curve_x:.2f} {tail_curve_y:.2f} 6 108",
+    )
+
+    svg_output = ET.tostring(root, encoding="unicode")
+    if not svg_output.startswith("<?xml"):
+        svg_output = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + svg_output
+    return svg_output
 
 
 PLACEHOLDER_JPEG = (
@@ -683,6 +727,7 @@ def ensure_web_assets() -> None:
     _write_asset(WEB_DIR / "index.html", INDEX_HTML)
     _write_asset(STATIC_DIR / "app.js", APP_JS)
     _write_asset(STATIC_DIR / "styles.css", STYLES_CSS)
+    _write_asset(STATIC_DIR / "dog.svg", DOG_SVG_FALLBACK)
 
 
 def build_status_payload() -> Dict[str, Any]:
