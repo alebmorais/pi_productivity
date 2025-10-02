@@ -1,19 +1,23 @@
-# Segredos e configs locais
+# ===== CONFIGS LOCAIS / SEGREDOS =====
 .env
 *.env
 .env.*
 !.env.example
 
-# Bancos de dados
+# ===== BANCOS DE DADOS =====
 *.db
 *.sqlite
 *.sqlite3
 
-# Python cache/artefatos
+# ===== PYTHON =====
 __pycache__/
 *.py[cod]
 *.log
 
-# Virtualenv (ajuste se o nome for diferente)
+# Virtualenv
 .venv/
 venv/
+
+# ===== OUTROS =====
+.DS_Store
+*.swp
