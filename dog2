@@ -10,7 +10,11 @@
 %%LanguageLevel: 2
 %%DocumentData: Clean7Bit
 %ADOBeginClientInjection: DocumentHeader "AI11EPS"
-%%AI8_CreatorVersion: 23.0.6%AI9_PrintingDataBegin%ADO_BuildNumber: Adobe Illustrator(R) 23.0.6 x637 R agm 4.7767 ct 5.4352%ADO_ContainsXMP: MainFirst%%Keywords: (dog, pet, happy, cute, orange, puppy, smile, funny, cartoon, domestic, isolated, white, character, corgi, vector, background, alone, canine, companion, down, friend, front, graphic, group, joyful, label, lovely, lying, mammal, mascot, minima
+%%AI8_CreatorVersion: 23.0.6
+%AI9_PrintingDataBegin
+%ADO_BuildNumber: Adobe Illustrator(R) 23.0.6 x637 R agm 4.7767 ct 5.4352
+%ADO_ContainsXMP: MainFirst
+%%Keywords: (dog, pet, happy, cute, orange, puppy, smile, funny, cartoon, domestic, isolated, white, character, corgi, vector, background, alone, canine, companion, down, friend, front, graphic, group, joyful, label, lovely, lying, mammal, mascot, minima
 %%+list, nose, obedient, play, poster, print, purebred, short, signs, tongue, wildlife, adorable, ball, ears, england, fox, fur, herding, logotype, looking)
 
 %ADOEndClientInjection: DocumentHeader "AI11EPS"
@@ -7984,7 +7988,8 @@ currentdict Adobe_AGM_Utils eq {end} if
 %%EndPageComments
 %%BeginPageSetup
 %ADOBeginClientInjection: PageSetup Start "AI11EPS"
-%AI12_RMC_Transparency: Balance=75 RasterRes=300 GradRes=150 Text=0 Stroke=1 Clip=1 OP=0
+%AI12_RMC_Transparency: Balance=75 RasterRes=300 GradRes=150 Text=0 Stroke=1 Clip=1 OP=0
+
 %ADOEndClientInjection: PageSetup Start "AI11EPS"
 Adobe_AGM_Utils begin
 Adobe_AGM_Core/ps gx
@@ -7992,7 +7997,18 @@ Adobe_AGM_Utils/capture_cpd gx
 Adobe_CoolType_Core/ps get exec
 Adobe_AGM_Image/ps gx
 %ADOBeginClientInjection: PageSetup End "AI11EPS"
-/currentdistillerparams where{pop currentdistillerparams /CoreDistVersion get 5000 lt} {true} ifelse{ userdict /AI11_PDFMark5 /cleartomark load putuserdict /AI11_ReadMetadata_PDFMark5 {flushfile cleartomark } bind put}{ userdict /AI11_PDFMark5 /pdfmark load putuserdict /AI11_ReadMetadata_PDFMark5 {/PUT pdfmark} bind put } ifelse[/NamespacePush AI11_PDFMark5[/_objdef {ai_metadata_stream_123} /type /stream /OBJ AI11_PDFMark5[{ai_metadata_stream_123}currentfile 0 (%  &&end XMP packet marker&&)/SubFileDecode filter AI11_ReadMetadata_PDFMark5<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+/currentdistillerparams where
+{pop currentdistillerparams /CoreDistVersion get 5000 lt} {true} ifelse
+{ userdict /AI11_PDFMark5 /cleartomark load put
+userdict /AI11_ReadMetadata_PDFMark5 {flushfile cleartomark } bind put}
+{ userdict /AI11_PDFMark5 /pdfmark load put
+userdict /AI11_ReadMetadata_PDFMark5 {/PUT pdfmark} bind put } ifelse
+[/NamespacePush AI11_PDFMark5
+[/_objdef {ai_metadata_stream_123} /type /stream /OBJ AI11_PDFMark5
+[{ai_metadata_stream_123}
+currentfile 0 (%  &&end XMP packet marker&&)
+/SubFileDecode filter AI11_ReadMetadata_PDFMark5
+<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c145 79.163499, 2018/08/13-16:40:22        ">
    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
       <rdf:Description rdf:about=""
@@ -8598,7 +8614,15 @@ Adobe_AGM_Image/ps gx
                                                                                                     
                                                                                                     
                                                                                                     
-                 <?xpacket end="w"?>%  &&end XMP packet marker&&[{ai_metadata_stream_123}<</Type /Metadata /Subtype /XML>>/PUT AI11_PDFMark5[/Document1 dict begin /Metadata {ai_metadata_stream_123} defcurrentdict end /BDC AI11_PDFMark5
+                 <?xpacket end="w"?>
+%  &&end XMP packet marker&&
+[{ai_metadata_stream_123}
+<</Type /Metadata /Subtype /XML>>
+/PUT AI11_PDFMark5
+[/Document
+1 dict begin /Metadata {ai_metadata_stream_123} def
+currentdict end /BDC AI11_PDFMark5
+
 %ADOEndClientInjection: PageSetup End "AI11EPS"
 %%EndPageSetup
 1 -1 scale 0 -2000 translate
@@ -14281,14 +14305,17 @@ cp
 .168627 .14902 .247059 rgb
 f
 %ADOBeginClientInjection: EndPageContent "AI11EPS"
-userdict /annotatepage 2 copy known {get exec}{pop pop} ifelse
+userdict /annotatepage 2 copy known {get exec}{pop pop} ifelse
+
 %ADOEndClientInjection: EndPageContent "AI11EPS"
 grestore
 grestore
 pgrs
 %%PageTrailer
 %ADOBeginClientInjection: PageTrailer Start "AI11EPS"
-[/EMC AI11_PDFMark5[/NamespacePop AI11_PDFMark5
+[/EMC AI11_PDFMark5
+[/NamespacePop AI11_PDFMark5
+
 %ADOEndClientInjection: PageTrailer Start "AI11EPS"
 [
 [/CSA [/0 ]]
