@@ -1,0 +1,3 @@
+# Restrict CodeQL analysis to Python, since this repository contains only Python sources.
+languages:
+  - python
