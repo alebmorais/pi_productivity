@@ -275,3 +275,18 @@ python ~/pi_productivity/analyze_productivity.py
 
 # Editar configs
 nano ~/pi_productivity/.env
+
+# How to run the Pi loops (main.py)
+main.py drives the Sense HAT, posture/OCR camera loops, and hydration reminders. After activating the project’s virtualenv you can launch it in a single command:
+cd ~/pi_productivity && source .venv/bin/activate && python main.py
+
+# How to run the FastAPI web UI
+The companion FastAPI server lives in the WebApp entrypoint. Make sure the extra dependencies are installed:
+python -m pip install fastapi uvicorn[standard] jinja2 watchdog opencv-python numpy
+
+# Then start the web UI (defaults to 0.0.0.0:8090, override with WEBAPP_HOST/WEBAPP_PORT if needed) in one line:
+cd ~/pi_productivity && source .venv/bin/activate && python WebApp
+An alternative foreground launch that makes the host/port explicit is:
+cd ~/pi_productivity && source .venv/bin/activate && uvicorn WebApp:app --host 0.0.0.0 --port 8090
+
+# WebApp also exposes start_in_background() if you later decide to import it from main.py and keep both processes in the same interpreter.
