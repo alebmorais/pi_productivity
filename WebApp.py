@@ -338,9 +338,9 @@ function formatReading(value){
 }
 
 function dogUrl(state, activity){
-  const modeValue = state !== undefined && state !== null ? state : 'idle';
+  const modeValue = state != null ? state : 'idle';
   const mode = encodeURIComponent(modeValue);
-  const activityValue = activity !== undefined && activity !== null ? activity : 0;
+  const activityValue = activity != null ? activity : 0;
   let act = Number(activityValue);
   if(!Number.isFinite(act)){ act = 0; }
   act = Math.max(0, Math.min(1, act));
