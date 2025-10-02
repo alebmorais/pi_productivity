@@ -388,7 +388,7 @@ class App:
         self._show_mode_pattern(name)
 
     def handle_joystick(self, event):
-     if event.action not in ("pressed", "held"):
+        if event.action not in ("pressed", "held"):
             return
 
         delta = 0
