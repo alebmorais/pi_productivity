@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pi_productivity</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🐾 pi_productivity</div>
+    <div class="clock" id="clock"></div>
+  </header>
+
+  <main class="grid">
+    <section class="panel corgi-panel">
+      <img id="corgi" src="/dog.svg?mode=idle" alt="Dog mascot" />
+      <div class="mode" id="mode">Mode: ...</div>
+    </section>
+
+    <section class="panel measures">
+      <h3>Measures</h3>
+      <div class="measure"><span>Temp</span><b id="temp">--</b><span>°C</span></div>
+      <div class="measure"><span>Humidity</span><b id="hum">--</b><span>%</span></div>
+      <div class="measure"><span>Pressure</span><b id="pres">--</b><span>hPa</span></div>
+      <div class="availability" id="senseAvail"></div>
+    </section>
+
+    <section class="panel camera">
+      <h3>Camera</h3>
+      <img id="cam" src="/camera.jpg" alt="Camera" />
+    </section>
+
+    <section class="panel motion">
+      <h3>Motion tasks/events</h3>
+      <pre id="motion"></pre>
+    </section>
+  </main>
+
+  <footer class="foot">Made with FastAPI • Resize window to see compact mode</footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

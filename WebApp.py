@@ -40,7 +40,10 @@ from __future__ import annotations
 import asyncio
 import os
 import io
-import cv2  # type: ignore
+try:
+    import cv2  # type: ignore
+except Exception:  # noqa: BLE001
+    cv2 = None  # type: ignore
 import json
 import time
 import enum
@@ -146,6 +149,9 @@ class Camera:
         self._open()
 
     def _open(self):
+        if cv2 is None:
+            self.cap = None
+            return
         try:
             self.cap = cv2.VideoCapture(self.index)
             if not self.cap or not self.cap.isOpened():
@@ -154,6 +160,8 @@ class Camera:
             self.cap = None
 
     def read_jpeg(self) -> Optional[bytes]:
+        if cv2 is None:
+            return None
         with self.lock:
             if not self.cap:
                 self._open()
@@ -317,9 +325,31 @@ const motionEl = document.getElementById('motion');
 const modeEl = document.getElementById('mode');
 const corgi = document.getElementById('corgi');
 
+function isPresent(value){
+  return value !== undefined && value !== null;
+}
+
+function ensureObject(value){
+  return value !== undefined && value !== null && typeof value === 'object' ? value : {};
+}
+
+function ensureArray(value){
+  return Array.isArray(value) ? value : [];
+}
+
+function hasOwn(obj, prop){
+  return Object.prototype.hasOwnProperty.call(obj, prop);
+}
+
+function formatReading(value){
+  return isPresent(value) && typeof value.toFixed === 'function' ? value.toFixed(1) : '--';
+}
+
 function dogUrl(state, activity){
-  const mode = encodeURIComponent(state ?? 'idle');
-  let act = Number(activity ?? 0);
+  const modeValue = state !== undefined && state !== null ? state : 'idle';
+  const mode = encodeURIComponent(modeValue);
+  const activityValue = activity !== undefined && activity !== null ? activity : 0;
+  let act = Number(activityValue);
   if(!Number.isFinite(act)){ act = 0; }
   act = Math.max(0, Math.min(1, act));
   const ts = Date.now();
@@ -334,7 +364,7 @@ setInterval(tickClock, 500);
 
 function setCorgi(state, activity){
   // swap CSS class to animate different states
-  const next = (state || 'idle');
+  const next = isPresent(state) ? state : 'idle';
   corgi.classList.remove('idle','focus','break','alert');
   corgi.classList.add(next);
   corgi.src = dogUrl(next, activity);
@@ -349,22 +379,6 @@ async function refreshOnce(){
       return;
     }
     const j = await r.json();
-    const sense = (j && j.sense) ? j.sense : {};
-    tempEl.textContent = ('temperature' in sense && sense.temperature != null) ? Number(sense.temperature).toFixed(1) : '--';
-    humEl.textContent = ('humidity' in sense && sense.humidity != null) ? Number(sense.humidity).toFixed(1) : '--';
-    presEl.textContent = ('pressure' in sense && sense.pressure != null) ? Number(sense.pressure).toFixed(1) : '--';
-    senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-    const motionLines = Array.isArray(j?.motion) ? j.motion : [];
-    motionEl.textContent = motionLines.slice(-50).join('\\n');
-    const rawMode = (j && Object.prototype.hasOwnProperty.call(j, 'mode')) ? j.mode : undefined;
-    const mode = rawMode != null ? String(rawMode) : 'UNKNOWN';
-    modeEl.textContent = 'Mode: ' + mode;
-
-    const stateCandidate = mode.toLowerCase();
-    const validStates = ['idle','focus','break','alert'];
-    const state = validStates.includes(stateCandidate) ? stateCandidate : 'idle';
-    let activity = ('activity_level' in (j||{})) && j.activity_level != null ? Number(j.activity_level) : 0;
-    if(!Number.isFinite(activity)){ activity = 0; }
     setCorgi(state, activity);
   }catch(e){
     console.error(e);
@@ -376,24 +390,6 @@ async function initWS(){
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
     ws.onmessage = (ev)=>{
       const j = JSON.parse(ev.data);
-      if(j.kind==='tick'){
-        const payload = j.payload || {};
-        const sense = payload.sense || {};
-        tempEl.textContent = ('temperature' in sense && sense.temperature != null) ? Number(sense.temperature).toFixed(1) : '--';
-        humEl.textContent = ('humidity' in sense && sense.humidity != null) ? Number(sense.humidity).toFixed(1) : '--';
-        presEl.textContent = ('pressure' in sense && sense.pressure != null) ? Number(sense.pressure).toFixed(1) : '--';
-        senseAvail.textContent = sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
-        const motionLines = Array.isArray(payload.motion) ? payload.motion : [];
-        motionEl.textContent = motionLines.slice(-50).join('\\n');
-        const rawMode = Object.prototype.hasOwnProperty.call(payload, 'mode') ? payload.mode : undefined;
-        const mode = rawMode != null ? String(rawMode) : 'UNKNOWN';
-        modeEl.textContent = 'Mode: ' + mode;
-        let activity = ('activity_level' in payload && payload.activity_level != null) ? Number(payload.activity_level) : 0;
-        if(!Number.isFinite(activity)){ activity = 0; }
-        const stateCandidate = mode.toLowerCase();
-        const validStates = ['idle','focus','break','alert'];
-        const state = validStates.includes(stateCandidate) ? stateCandidate : 'idle';
-        setCorgi(state, activity);
       }
     };
     ws.onclose = ()=> setTimeout(initWS, 2000);
