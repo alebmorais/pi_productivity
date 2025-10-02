@@ -1,0 +1,430 @@
+"""
+main.py — pi_productivity
+
+Adds a FastAPI-based web app that runs alongside your existing pipeline.
+- Shows Sense HAT diagnostics (or graceful fallbacks when not present)
+- Shows current mode (pulls from your project if available)
+- Shows camera preview endpoint
+- Shows Motion events/tasks (tails motion log)
+- Cute responsive Corgi mascot reacts to activity/mode
+
+How it works
+------------
+• On startup, this file also writes minimal front-end assets to ./web/ (index.html, app.js, styles.css, corgi.svg) if they don't exist, so you can keep a single-file entrypoint.
+• The web app runs on 0.0.0.0 (LAN-accessible) at port 8090 by default (override via env WEBAPP_PORT).
+• The server runs in a background thread so your other tasks can continue to run.
+• When the window is narrow/small, the UI collapses to only Corgi + measures + time.
+
+Requirements (install as needed)
+--------------------------------
+python -m pip install fastapi uvicorn[standard] jinja2 watchdog opencv-python numpy
+# Optional (on Raspberry Pi OS, prefer system packages for OpenCV if heavy):
+# sudo apt-get install python3-opencv
+
+Camera notes
+------------
+• If OpenCV can't open /dev/video0, the /camera.jpg returns a 1x1 placeholder.
+• If you already run Motion with an MJPEG stream, you can swap the <img> to that URL.
+
+Sense HAT notes
+---------------
+• If Sense HAT not available, fake readings are provided.
+
+Motion events
+-------------
+• Tails /var/log/motion/motion.log (Debian default) for last N events. Adjust MOTION_LOG below if yours differs.
+
+"""
+
+from __future__ import annotations
+import os
+import io
+import cv2  # type: ignore
+import sys
+import json
+import time
+import enum
+import queue
+import threading
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional, List
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+# ---------------- Configuration ----------------
+WEB_DIR = Path(__file__).parent / "web"
+TEMPLATES_DIR = WEB_DIR
+STATIC_DIR = WEB_DIR / "static"
+MOTION_LOG = Path("/var/log/motion/motion.log")  # adjust if needed
+PORT = int(os.getenv("WEBAPP_PORT", "8090"))
+HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
+
+# ---------------- Sense HAT (optional) ----------------
+class SenseFacade:
+    def __init__(self):
+        self.ok = False
+        self.err = None
+        try:
+            # Try sense-hat first; on Bookworm it may be 'sense_emu' or 'sense_hat'.
+            from sense_hat import SenseHat  # type: ignore
+            self.sense = SenseHat()
+            self.ok = True
+        except Exception as e:  # noqa: BLE001
+            self.sense = None
+            self.err = str(e)
+
+    def readings(self) -> Dict[str, Any]:
+        if self.ok and self.sense:
+            try:
+                t = self.sense.get_temperature()
+                h = self.sense.get_humidity()
+                p = self.sense.get_pressure()
+                return {
+                    "temperature": round(float(t), 1),
+                    "humidity": round(float(h), 1),
+                    "pressure": round(float(p), 1),
+                    "available": True,
+                }
+            except Exception as e:  # noqa: BLE001
+                return {"available": False, "error": f"SenseHat read failed: {e}"}
+        # Fallback fake data
+        return {
+            "temperature": 25.0,
+            "humidity": 50.0,
+            "pressure": 1013.0,
+            "available": False,
+            "error": self.err or "Sense HAT not detected — using fake data",
+        }
+
+# ---------------- Mode detection (plugs into your project) ----------------
+class Mode(str, enum.Enum):
+    IDLE = "IDLE"
+    FOCUS = "FOCUS"
+    BREAK = "BREAK"
+    ALERT = "ALERT"
+
+_current_mode: Mode = Mode.IDLE
+
+# Try to import a mode provider from your project if present
+# Expose a lightweight getter so the UI reflects your real state.
+
+def get_current_mode() -> str:
+    global _current_mode
+    try:
+        # Example: your project may expose something like this
+        # from sense_modes import current_mode  # type: ignore
+        # return str(current_mode())
+        pass
+    except Exception:
+        pass
+    return str(_current_mode)
+
+# Allow updating mode from elsewhere in your code
+
+def set_mode(new_mode: str | Mode) -> None:
+    global _current_mode
+    try:
+        _current_mode = Mode(str(new_mode))
+    except Exception:
+        _current_mode = Mode.IDLE
+
+# ---------------- Camera helpers ----------------
+class Camera:
+    def __init__(self, index: int = 0):
+        self.index = index
+        self.cap = None
+        self.lock = threading.Lock()
+        self._open()
+
+    def _open(self):
+        try:
+            self.cap = cv2.VideoCapture(self.index)
+            if not self.cap or not self.cap.isOpened():
+                self.cap = None
+        except Exception:
+            self.cap = None
+
+    def read_jpeg(self) -> Optional[bytes]:
+        with self.lock:
+            if not self.cap:
+                self._open()
+                if not self.cap:
+                    return None
+            ok, frame = self.cap.read()
+            if not ok:
+                return None
+            ok, buf = cv2.imencode(".jpg", frame)
+            if not ok:
+                return None
+            return bytes(buf)
+
+# ---------------- Motion log tail ----------------
+class MotionTailer:
+    def __init__(self, path: Path, max_lines: int = 50):
+        self.path = path
+        self.max_lines = max_lines
+        self.lines: List[str] = []
+        self._stop = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self.thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def snapshot(self) -> List[str]:
+        return list(self.lines[-self.max_lines :])
+
+    def _run(self):
+        try:
+            # On first run, read last max_lines from file if present
+            if self.path.exists():
+                with self.path.open("r", errors="ignore") as f:
+                    self.lines = f.readlines()[-self.max_lines :]
+            # Follow the file
+            while not self._stop.is_set():
+                if not self.path.exists():
+                    time.sleep(1)
+                    continue
+                with self.path.open("r", errors="ignore") as f:
+                    f.seek(0, os.SEEK_END)
+                    while not self._stop.is_set():
+                        pos = f.tell()
+                        line = f.readline()
+                        if not line:
+                            time.sleep(0.5)
+                            f.seek(pos)
+                        else:
+                            self.lines.append(line.rstrip())
+                            self.lines = self.lines[-(self.max_lines * 2) :]
+        except Exception:
+            # Keep quiet; UI will just show nothing
+            pass
+
+# ---------------- App state & broadcaster ----------------
+class Broadcaster:
+    def __init__(self):
+        self.clients: List[WebSocket] = []
+        self.lock = threading.Lock()
+
+    async def add(self, ws: WebSocket):
+        await ws.accept()
+        with self.lock:
+            self.clients.append(ws)
+
+    def remove(self, ws: WebSocket):
+        with self.lock:
+            if ws in self.clients:
+                self.clients.remove(ws)
+
+    async def publish(self, payload: Dict[str, Any]):
+        dead: List[WebSocket] = []
+        for ws in list(self.clients):
+            try:
+                await ws.send_text(json.dumps(payload))
+            except Exception:
+                dead.append(ws)
+        for d in dead:
+            self.remove(d)
+
+sense = SenseFacade()
+camera = Camera(index=0)
+motion = MotionTailer(MOTION_LOG, max_lines=100)
+bus = Broadcaster()
+
+# ---------------- FastAPI setup ----------------
+app = FastAPI(title="pi_productivity Web UI", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Jinja2 environment
+jinja_env = Environment(
+    loader=FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=select_autoescape(['html', 'xml'])
+)
+
+# Static files
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# ---------------- Assets (written once) ----------------
+INDEX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pi_productivity</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🐾 pi_productivity</div>
+    <div class="clock" id="clock"></div>
+  </header>
+
+  <main class="grid">
+    <section class="panel corgi-panel">
+      <img id="corgi" src="/static/corgi.svg" alt="Corgi" />
+      <div class="mode" id="mode">Mode: ...</div>
+    </section>
+
+    <section class="panel measures">
+      <h3>Measures</h3>
+      <div class="measure"><span>Temp</span><b id="temp">--</b><span>°C</span></div>
+      <div class="measure"><span>Humidity</span><b id="hum">--</b><span>%</span></div>
+      <div class="measure"><span>Pressure</span><b id="pres">--</b><span>hPa</span></div>
+      <div class="availability" id="senseAvail"></div>
+    </section>
+
+    <section class="panel camera">
+      <h3>Camera</h3>
+      <img id="cam" src="/camera.jpg" alt="Camera" />
+    </section>
+
+    <section class="panel motion">
+      <h3>Motion tasks/events</h3>
+      <pre id="motion"></pre>
+    </section>
+  </main>
+
+  <footer class="foot">Made with FastAPI • Resize window to see compact mode</footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+"""
+
+APP_JS = """
+const clock = document.getElementById('clock');
+const tempEl = document.getElementById('temp');
+const humEl = document.getElementById('hum');
+const presEl = document.getElementById('pres');
+const senseAvail = document.getElementById('senseAvail');
+const motionEl = document.getElementById('motion');
+const modeEl = document.getElementById('mode');
+const corgi = document.getElementById('corgi');
+
+function tickClock(){
+  const now = new Date();
+  clock.textContent = now.toLocaleString();
+}
+setInterval(tickClock, 500);
+
+function setCorgi(state){
+  // swap CSS class to animate different states
+  corgi.classList.remove('idle','focus','break','alert');
+  corgi.classList.add(state);
+}
+
+async function refreshOnce(){
+  try{
+    const r = await fetch('/api/status');
+    const j = await r.json();
+    const s = j.sense;
+    tempEl.textContent = s.temperature?.toFixed?.(1) ?? '--';
+    humEl.textContent = s.humidity?.toFixed?.(1) ?? '--';
+    presEl.textContent = s.pressure?.toFixed?.(1) ?? '--';
+    senseAvail.textContent = s.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
+    motionEl.textContent = (j.motion||[]).slice(-50).join('\n');
+    modeEl.textContent = 'Mode: ' + j.mode;
+
+    const state = (j.mode||'IDLE').toLowerCase();
+    setCorgi(state);
+  }catch(e){
+    console.error(e);
+  }
+}
+
+async function initWS(){
+  try{
+    const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
+    ws.onmessage = (ev)=>{
+      const j = JSON.parse(ev.data);
+      if(j.kind==='tick'){
+        const s = j.payload;
+        tempEl.textContent = s.sense.temperature?.toFixed?.(1) ?? '--';
+        humEl.textContent = s.sense.humidity?.toFixed?.(1) ?? '--';
+        presEl.textContent = s.sense.pressure?.toFixed?.(1) ?? '--';
+        senseAvail.textContent = s.sense.available ? 'Sense HAT ✓' : 'Sense HAT unavailable';
+        motionEl.textContent = (s.motion||[]).slice(-50).join('\n');
+        modeEl.textContent = 'Mode: ' + s.mode;
+        setCorgi((s.mode||'IDLE').toLowerCase());
+      }
+    };
+    ws.onclose = ()=> setTimeout(initWS, 2000);
+  }catch(e){
+    console.error('WS init failed', e);
+  }
+}
+
+refreshOnce();
+initWS();
+"""
+
+STYLES_CSS = """
+:root{ --bg:#0b0f14; --panel:#0f1720; --text:#e6edf3; --muted:#9fb0c0; --accent:#3fa9f5; }
+*{ box-sizing:border-box; }
+html,body{ margin:0; height:100%; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Ubuntu, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; }
+.topbar{ display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#0c131b; position:sticky; top:0; z-index:10; box-shadow:0 2px 8px rgba(0,0,0,.3) }
+.brand{ font-weight:700; letter-spacing:.3px }
+.clock{ color:var(--muted); font-variant-numeric:tabular-nums }
+.grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; padding:12px; }
+.panel{ background:var(--panel); border:1px solid #152033; border-radius:14px; padding:12px; box-shadow:0 6px 20px rgba(0,0,0,.25); }
+.corgi-panel{ grid-column: span 4; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.corgi-panel img{ width:100%; max-width:280px; transition: transform .4s ease; filter: drop-shadow(0 10px 25px rgba(0,0,0,.35)); }
+.corgi-panel img.idle{ transform: translateY(0px); }
+.corgi-panel img.focus{ transform: translateY(-6px) scale(1.02); }
+.corgi-panel img.break{ transform: translateY(2px) scale(.98); filter: grayscale(.2) brightness(.9); }
+.corgi-panel img.alert{ animation: wiggle .18s ease-in-out 0s 8 alternate; }
+@keyframes wiggle{ from{ transform: rotate(-6deg)} to{ transform: rotate(6deg)} }
+.corgi-panel .mode{ margin-top:8px; color:var(--muted) }
+
+.measures{ grid-column: span 3; }
+.measures h3{ margin:2px 0 10px }
+.measure{ display:flex; align-items:baseline; gap:6px; margin:4px 0 }
+.measure b{ font-size:1.3rem }
+.availability{ margin-top:6px; color:var(--muted) }
+
+.camera{ grid-column: span 5; }
+.camera img{ width:100%; border-radius:10px; border:1px solid #1b2940 }
+
+.motion{ grid-column: span 12; }
+.motion pre{ white-space: pre-wrap; max-height: 260px; overflow:auto; color:#cfe3ff; background:#0b1220; padding:10px; border-radius:10px; border:1px solid #152033 }
+
+.foot{ text-align:center; color:var(--muted); padding:8px 0 16px }
+
+/* Compact mode: when small, show only corgi + measures */
+@media (max-width: 680px){
+  .grid{ grid-template-columns: repeat(4, 1fr); }
+  .camera{ display:none }
+  .motion{ display:none }
+  .corgi-panel{ grid-column: span 4; }
+  .measures{ grid-column: span 4; }
+}
+"""
+
+CORGI_SVG = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" aria-hidden=\"true\">
+  <defs>
+    <linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0\" stop-color=\"#ffb36b\"/><stop offset=\"1\" stop-color=\"#ff8c42\"/></linearGradient>
+  </defs>
+  <rect width=\"256\" height=\"256\" rx=\"32\" fill=\"#0f1720\"/>
+  <g transform=\"translate(16,24)\">
+    <path d=\"M32 120c0-40 28-64 64-64h40c36 0 64 24 64 64 0 32-16 56-48 64-13 3-28 8-40 8s-27-5-40-8c-32-8-40-32-40-64Z\" fill=\"url(#g)\" stroke=\"#3d2b1f\" stroke-width=\"3\"/>
+    <circle cx=\"96\" cy=\"88\" r=\"10\" fill=\"#1b1b1b\"/>
+    <circle cx=\"160\" cy=\"88\" r=\"10\" fill=\"#1b1b1b\"/>
+    <path d=\"M120 102c4 4 12 4 16 0 2-2 6 1 6 4 0 12-14 18-14 18s-14-6-14-18c0-3 4-6 6-4Z\" fill=\"#2a1b12\"/>
+    <path d=\"M64 40c0-18 20-28 28-16 8 12-4 24-20 34-4-6-8-10-8-18Z\" fill=\"#ffcf99\"/>
+    <path d=\"M192 40c0-18-20-28-28-16-8 12 4 24 20 34 4-6 8-10 8-18Z\" fill=\"#ffcf99\"/>
+    <ellipse cx=\"60\" cy=\"146\" rx=\"18\" ry=\"10\" fill=\"#ffd5a8\"/>
+    <ellipse cx=\"196\" cy=\"146\" rx=\"18\" ry=\"10\" fill=\"#ffd5a8\"/
