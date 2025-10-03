@@ -6,6 +6,8 @@ const senseAvail = document.getElementById('senseAvail');
 const motionEl = document.getElementById('motion');
 const modeEl = document.getElementById('mode');
 const corgi = document.getElementById('corgi');
+const presetButtons = Array.from(document.querySelectorAll('[data-mode-btn]'));
+const presetStatus = document.getElementById('presetStatus');
 
 const VALID_MODES = ['idle','focus','break','alert'];
 
@@ -38,6 +40,14 @@ function normalizeMode(value){
   return 'idle';
 }
 
+function describeMode(value){
+  const normalized = normalizeMode(value);
+  return {
+    normalized,
+    label: normalized.charAt(0).toUpperCase() + normalized.slice(1),
+  };
+}
+
 function formatNumber(value){
   const num = Number(value);
   return Number.isFinite(num) ? num.toFixed(1) : '--';
@@ -67,6 +77,70 @@ function setCorgi(state, activity){
   corgi.dataset.mode = next;
 }
 
+function setPresetStatus(message = '', isError = false){
+  if(!presetStatus){
+    return;
+  }
+  presetStatus.textContent = message;
+  if(isError){
+    presetStatus.classList.add('error');
+  }else{
+    presetStatus.classList.remove('error');
+  }
+}
+
+function updatePresetButtons(activeMode){
+  if(!presetButtons.length){
+    return;
+  }
+  const normalized = normalizeMode(activeMode);
+  for(const btn of presetButtons){
+    const target = normalizeMode(btn.dataset.mode);
+    const isActive = target === normalized;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  }
+}
+
+function bindPresetButtons(){
+  if(!presetButtons.length){
+    return;
+  }
+  for(const btn of presetButtons){
+    btn.addEventListener('click', async ()=>{
+      const desiredInfo = describeMode(btn.dataset.mode);
+      setPresetStatus(`Atualizando para ${desiredInfo.label}...`);
+      btn.disabled = true;
+      try{
+        const response = await fetch('/api/mode', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode: desiredInfo.normalized})
+        });
+        if(!response.ok){
+          throw new Error(`HTTP ${response.status}`);
+        }
+        let payload = {};
+        try{
+          payload = await response.json();
+        }catch(_err){
+          payload = {};
+        }
+        const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
+        setCorgi(next, 0);
+        updatePresetButtons(next);
+        const nextLabel = describeMode(next).label;
+        setPresetStatus(`Modo definido para ${nextLabel}.`);
+      }catch(err){
+        console.error('Failed to set mode', err);
+        setPresetStatus('Não foi possível atualizar o modo agora.', true);
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
 function updateSense(senseData){
   const sense = ensureObject(senseData);
   tempEl.textContent = formatNumber(sense.temperature);
@@ -88,10 +162,9 @@ function updateMotion(lines){
 }
 
 function updateModeDisplay(modeValue){
-  const normalized = normalizeMode(modeValue);
-  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
-  modeEl.textContent = `Mode: ${label}`;
-  return normalized;
+  const info = describeMode(modeValue);
+  modeEl.textContent = `Mode: ${info.label}`;
+  return info.normalized;
 }
 
 function applyStatus(payload){
@@ -102,6 +175,7 @@ function applyStatus(payload){
   const activity = Number(payload.activity_level);
   const activityValue = Number.isFinite(activity) ? activity : 0;
   setCorgi(normalizedMode, activityValue);
+  updatePresetButtons(normalizedMode);
   updateSense(payload.sense);
   updateMotion(payload.motion);
 }
@@ -149,6 +223,11 @@ async function initWS(){
     console.error('WS init failed', e);
   }
 }
+
+setCorgi('idle', 0);
+updatePresetButtons('idle');
+setPresetStatus('');
+bindPresetButtons();
 
 tickClock();
 setInterval(tickClock, 500);

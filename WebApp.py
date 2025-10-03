@@ -299,6 +299,18 @@ INDEX_HTML = """<!DOCTYPE html>
       <div class="availability" id="senseAvail"></div>
     </section>
 
+    <section class="panel presets">
+      <h3>Presets de modo</h3>
+      <p class="preset-hint">Troque o modo manualmente quando não estiver usando o joystick.</p>
+      <div class="preset-list">
+        <button type="button" class="preset-btn" data-mode-btn data-mode="idle">Idle</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="focus">Focus</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="break">Break</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="alert">Alert</button>
+      </div>
+      <div class="preset-status" id="presetStatus"></div>
+    </section>
+
     <section class="panel camera">
       <h3>Camera</h3>
       <img id="cam" src="/camera.jpg" alt="Camera" />
@@ -325,6 +337,8 @@ const senseAvail = document.getElementById('senseAvail');
 const motionEl = document.getElementById('motion');
 const modeEl = document.getElementById('mode');
 const corgi = document.getElementById('corgi');
+const presetButtons = Array.from(document.querySelectorAll('[data-mode-btn]'));
+const presetStatus = document.getElementById('presetStatus');
 
 const VALID_MODES = ['idle','focus','break','alert'];
 
@@ -357,6 +371,14 @@ function normalizeMode(value){
   return 'idle';
 }
 
+function describeMode(value){
+  const normalized = normalizeMode(value);
+  return {
+    normalized,
+    label: normalized.charAt(0).toUpperCase() + normalized.slice(1),
+  };
+}
+
 function formatNumber(value){
   const num = Number(value);
   return Number.isFinite(num) ? num.toFixed(1) : '--';
@@ -386,6 +408,70 @@ function setCorgi(state, activity){
   corgi.dataset.mode = next;
 }
 
+function setPresetStatus(message = '', isError = false){
+  if(!presetStatus){
+    return;
+  }
+  presetStatus.textContent = message;
+  if(isError){
+    presetStatus.classList.add('error');
+  }else{
+    presetStatus.classList.remove('error');
+  }
+}
+
+function updatePresetButtons(activeMode){
+  if(!presetButtons.length){
+    return;
+  }
+  const normalized = normalizeMode(activeMode);
+  for(const btn of presetButtons){
+    const target = normalizeMode(btn.dataset.mode);
+    const isActive = target === normalized;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  }
+}
+
+function bindPresetButtons(){
+  if(!presetButtons.length){
+    return;
+  }
+  for(const btn of presetButtons){
+    btn.addEventListener('click', async ()=>{
+      const desiredInfo = describeMode(btn.dataset.mode);
+      setPresetStatus(`Atualizando para ${desiredInfo.label}...`);
+      btn.disabled = true;
+      try{
+        const response = await fetch('/api/mode', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode: desiredInfo.normalized})
+        });
+        if(!response.ok){
+          throw new Error(`HTTP ${response.status}`);
+        }
+        let payload = {};
+        try{
+          payload = await response.json();
+        }catch(_err){
+          payload = {};
+        }
+        const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
+        setCorgi(next, 0);
+        updatePresetButtons(next);
+        const nextLabel = describeMode(next).label;
+        setPresetStatus(`Modo definido para ${nextLabel}.`);
+      }catch(err){
+        console.error('Failed to set mode', err);
+        setPresetStatus('Não foi possível atualizar o modo agora.', true);
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
 function updateSense(senseData){
   const sense = ensureObject(senseData);
   tempEl.textContent = formatNumber(sense.temperature);
@@ -407,10 +493,9 @@ function updateMotion(lines){
 }
 
 function updateModeDisplay(modeValue){
-  const normalized = normalizeMode(modeValue);
-  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
-  modeEl.textContent = `Mode: ${label}`;
-  return normalized;
+  const info = describeMode(modeValue);
+  modeEl.textContent = `Mode: ${info.label}`;
+  return info.normalized;
 }
 
 function applyStatus(payload){
@@ -421,6 +506,7 @@ function applyStatus(payload){
   const activity = Number(payload.activity_level);
   const activityValue = Number.isFinite(activity) ? activity : 0;
   setCorgi(normalizedMode, activityValue);
+  updatePresetButtons(normalizedMode);
   updateSense(payload.sense);
   updateMotion(payload.motion);
 }
@@ -469,6 +555,11 @@ async function initWS(){
   }
 }
 
+setCorgi('idle', 0);
+updatePresetButtons('idle');
+setPresetStatus('');
+bindPresetButtons();
+
 tickClock();
 setInterval(tickClock, 500);
 refreshOnce();
@@ -499,7 +590,18 @@ html,body{ margin:0; height:100%; background:var(--bg); color:var(--text); font-
 .measure b{ font-size:1.3rem }
 .availability{ margin-top:6px; color:var(--muted) }
 
-.camera{ grid-column: span 5; }
+.presets{ grid-column: span 5; display:flex; flex-direction:column; gap:10px; }
+.preset-hint{ margin:0; color:var(--muted); font-size:.9rem; }
+.preset-list{ display:flex; flex-wrap:wrap; gap:8px; }
+.preset-btn{ flex:1 1 calc(50% - 8px); min-width:120px; padding:10px 12px; border-radius:10px; border:1px solid #1b2940; background:transparent; color:var(--text); font-size:1rem; cursor:pointer; transition: background .2s ease, border-color .2s ease, color .2s ease, transform .2s ease; }
+.preset-btn:hover{ background:rgba(63,169,245,0.12); border-color:var(--accent); transform:translateY(-1px); }
+.preset-btn:active{ transform:translateY(0); }
+.preset-btn.active{ background:var(--accent); color:#071019; border-color:var(--accent); box-shadow:0 6px 16px rgba(63,169,245,0.35); }
+.preset-btn:disabled{ opacity:.55; cursor:not-allowed; }
+.preset-status{ min-height:1.2em; font-size:.85rem; color:var(--muted); }
+.preset-status.error{ color:#ff9a9a; }
+
+.camera{ grid-column: span 12; }
 .camera img{ width:100%; border-radius:10px; border:1px solid #1b2940 }
 
 .motion{ grid-column: span 12; }
@@ -507,13 +609,16 @@ html,body{ margin:0; height:100%; background:var(--bg); color:var(--text); font-
 
 .foot{ text-align:center; color:var(--muted); padding:8px 0 16px }
 
-/* Compact mode: when small, show only corgi + measures */
+/* Compact mode: when small, show condensed layout */
 @media (max-width: 680px){
   .grid{ grid-template-columns: repeat(4, 1fr); }
   .camera{ display:none }
   .motion{ display:none }
   .corgi-panel{ grid-column: span 4; }
   .measures{ grid-column: span 4; }
+  .presets{ grid-column: span 4; }
+  .preset-list{ flex-direction:column; }
+  .preset-btn{ flex:1 1 auto; width:100%; }
 }
 """
 
