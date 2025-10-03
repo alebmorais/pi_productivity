@@ -1,15 +1,22 @@
 const clock = document.getElementById('clock');
+const modeEl = document.getElementById('mode');
+const presetButtons = Array.from(document.querySelectorAll('[data-mode-btn]'));
+const presetStatus = document.getElementById('presetStatus');
 const tempEl = document.getElementById('temp');
 const humEl = document.getElementById('hum');
 const presEl = document.getElementById('pres');
 const senseAvail = document.getElementById('senseAvail');
+const postureEventsEl = document.getElementById('postureEvents');
+const postureAdjustEl = document.getElementById('postureAdjust');
+const postureListEl = document.getElementById('postureRecent');
+const tasksTotalEl = document.getElementById('tasksTotal');
+const tasksCompletedEl = document.getElementById('tasksCompleted');
+const tasksCreatedEl = document.getElementById('tasksCreated');
+const tasksListEl = document.getElementById('tasksRecent');
 const motionEl = document.getElementById('motion');
-const modeEl = document.getElementById('mode');
-const corgi = document.getElementById('corgi');
-const presetButtons = Array.from(document.querySelectorAll('[data-mode-btn]'));
-const presetStatus = document.getElementById('presetStatus');
 
-const VALID_MODES = ['idle','focus','break','alert'];
+
+const VALID_MODES = ['idle', 'focus', 'break', 'alert'];
 
 function isPresent(value){
   return value !== undefined && value !== null;
@@ -44,24 +51,35 @@ function describeMode(value){
   const normalized = normalizeMode(value);
   return {
     normalized,
-    label: normalized.charAt(0).toUpperCase() + normalized.slice(1),
+
   };
 }
 
 function formatNumber(value){
   const num = Number(value);
-  return Number.isFinite(num) ? num.toFixed(1) : '--';
+  if(!Number.isFinite(num)){
+    return '--';
+  }
+  return num.toFixed(1);
 }
 
-function dogUrl(state, activity){
-  const mode = encodeURIComponent(normalizeMode(state));
-  let act = Number(activity);
-  if(!Number.isFinite(act)){
-    act = 0;
+function formatInt(value){
+  const num = Number.parseInt(value, 10);
+  if(!Number.isFinite(num)){
+    return '0';
   }
-  act = Math.max(0, Math.min(1, act));
-  const ts = Date.now();
-  return `/dog.svg?mode=${mode}&activity=${act.toFixed(2)}&ts=${ts}`;
+  return String(num);
+}
+
+function formatTimestamp(value){
+  if(!value){
+    return '—';
+  }
+  const parsed = new Date(value);
+  if(Number.isNaN(parsed.getTime())){
+    return String(value);
+  }
+  return parsed.toLocaleString();
 }
 
 function tickClock(){
@@ -69,12 +87,71 @@ function tickClock(){
   clock.textContent = now.toLocaleString();
 }
 
-function setCorgi(state, activity){
-  const next = normalizeMode(state);
-  corgi.classList.remove('idle','focus','break','alert');
-  corgi.classList.add(next);
-  corgi.src = dogUrl(next, activity);
-  corgi.dataset.mode = next;
+function setPresetStatus(message = '', isError = false){
+  if(!presetStatus){
+    return;
+  }
+  presetStatus.textContent = message;
+  presetStatus.classList.toggle('error', Boolean(isError));
+}
+
+function updatePresetButtons(activeMode){
+  if(!presetButtons.length){
+    return;
+  }
+  const normalized = normalizeMode(activeMode);
+  for(const btn of presetButtons){
+    const target = normalizeMode(btn.dataset.mode);
+    const isActive = target === normalized;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  }
+}
+
+function bindPresetButtons(){
+  if(!presetButtons.length){
+    return;
+  }
+  for(const btn of presetButtons){
+    btn.addEventListener('click', async ()=>{
+      const desiredInfo = describeMode(btn.dataset.mode);
+      setPresetStatus(`Atualizando para ${desiredInfo.label}...`);
+      btn.disabled = true;
+      try{
+        const response = await fetch('/api/mode', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode: desiredInfo.normalized})
+        });
+        if(!response.ok){
+          throw new Error(`HTTP ${response.status}`);
+        }
+        let payload = {};
+        try{
+          payload = await response.json();
+        }catch(_err){
+          payload = {};
+        }
+        const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
+        updatePresetButtons(next);
+        const nextLabel = describeMode(next).label;
+        setPresetStatus(`Modo definido para ${nextLabel}.`);
+      }catch(err){
+        console.error('Failed to set mode', err);
+        setPresetStatus('Não foi possível atualizar o modo agora.', true);
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
+function updateModeDisplay(modeValue){
+  const info = describeMode(modeValue);
+  if(modeEl){
+    modeEl.textContent = `Modo: ${info.label}`;
+  }
+  return info.normalized;
 }
 
 function setPresetStatus(message = '', isError = false){
@@ -148,23 +225,75 @@ function updateSense(senseData){
   presEl.textContent = formatNumber(sense.pressure);
 
   if(sense.available){
-    senseAvail.textContent = 'Sense HAT available';
+    senseAvail.textContent = 'Sense HAT disponível';
   }else if(hasOwn(sense, 'error') && isPresent(sense.error)){
     senseAvail.textContent = String(sense.error);
   }else{
-    senseAvail.textContent = 'Sense HAT unavailable';
+    senseAvail.textContent = 'Sense HAT indisponível';
   }
 }
 
-function updateMotion(lines){
-  const list = ensureArray(lines).map((item)=>String(item));
-  motionEl.textContent = list.length ? list.join('\n') : 'No recent motion events.';
+function renderList(element, items, fallbackText, decorate){
+  if(!element){
+    return;
+  }
+  element.textContent = '';
+  if(!items.length){
+    const li = document.createElement('li');
+    li.className = 'event-item empty';
+    li.textContent = fallbackText;
+    element.appendChild(li);
+    return;
+  }
+  for(const item of items){
+    const li = document.createElement('li');
+    li.className = 'event-item';
+    decorate(li, item);
+    element.appendChild(li);
+  }
 }
 
-function updateModeDisplay(modeValue){
-  const info = describeMode(modeValue);
-  modeEl.textContent = `Mode: ${info.label}`;
-  return info.normalized;
+function updatePosture(data){
+  const info = ensureObject(data);
+  postureEventsEl.textContent = formatInt(info.total_events);
+  postureAdjustEl.textContent = formatInt(info.adjustments);
+  const items = ensureArray(info.recent);
+  renderList(postureListEl, items, 'Nenhum evento recente.', (li, entry)=>{
+    const ok = Boolean(entry && entry.ok);
+    const ts = formatTimestamp(entry && entry.timestamp);
+    const reason = entry && entry.reason ? ` · ${entry.reason}` : '';
+    const tilt = entry && Number.isFinite(Number(entry.tilt)) ? ` · tilt ${Number(entry.tilt).toFixed(1)}°` : '';
+    const nod = entry && Number.isFinite(Number(entry.nod)) ? ` · nod ${Number(entry.nod).toFixed(1)}°` : '';
+    li.textContent = `${ts} • ${ok ? 'OK' : 'Ajuste'}${reason}${tilt}${nod}`;
+    if(!ok){
+      li.classList.add('warn');
+    }
+  });
+}
+
+function updateTasks(data){
+  const info = ensureObject(data);
+  tasksTotalEl.textContent = formatInt(info.total_events);
+  tasksCompletedEl.textContent = formatInt(info.completed);
+  tasksCreatedEl.textContent = formatInt(info.created);
+  const items = ensureArray(info.recent);
+  renderList(tasksListEl, items, 'Nenhum evento recente.', (li, entry)=>{
+    const ts = formatTimestamp(entry && entry.timestamp);
+    const action = entry && entry.action ? String(entry.action).toUpperCase() : 'EVENTO';
+    const section = entry && entry.section_title ? ` · ${entry.section_title}` : '';
+    const name = entry && entry.task_name ? ` — ${entry.task_name}` : '';
+    li.textContent = `${ts} • ${action}${section}${name}`;
+  });
+}
+
+function updateMotion(lines, source){
+  const list = ensureArray(lines).map((item)=>String(item));
+  motionEl.textContent = list.length ? list.join('\n') : 'Nenhum evento recente do Motion.';
+  if(motionSourceEl){
+    motionSourceEl.textContent = source ? `Fonte: ${source}` : '';
+  }
+}
+
 }
 
 function applyStatus(payload){
@@ -172,12 +301,12 @@ function applyStatus(payload){
     return;
   }
   const normalizedMode = updateModeDisplay(payload.mode);
-  const activity = Number(payload.activity_level);
-  const activityValue = Number.isFinite(activity) ? activity : 0;
-  setCorgi(normalizedMode, activityValue);
   updatePresetButtons(normalizedMode);
   updateSense(payload.sense);
-  updateMotion(payload.motion);
+  updatePosture(payload.posture);
+  updateTasks(payload.tasks);
+  updateMotion(payload.motion, payload.motion_source);
+  refreshCamera();
 }
 
 async function refreshOnce(){
@@ -189,13 +318,13 @@ async function refreshOnce(){
     }
     const j = await r.json();
     applyStatus(j);
-  }catch(e){
-    console.error(e);
+  }catch(err){
+    console.error('Initial refresh failed', err);
   }
 }
 
 function handleEnvelope(message){
-  if(!message || typeof message !== 'object'){
+  if(!message){
     return;
   }
   if(hasOwn(message, 'kind') && message.kind === 'tick'){
@@ -223,12 +352,9 @@ async function initWS(){
     console.error('WS init failed', e);
   }
 }
-
-setCorgi('idle', 0);
 updatePresetButtons('idle');
 setPresetStatus('');
 bindPresetButtons();
-
 tickClock();
 setInterval(tickClock, 500);
 refreshOnce();
