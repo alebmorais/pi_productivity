@@ -14,8 +14,7 @@ const tasksCompletedEl = document.getElementById('tasksCompleted');
 const tasksCreatedEl = document.getElementById('tasksCreated');
 const tasksListEl = document.getElementById('tasksRecent');
 const motionEl = document.getElementById('motion');
-const motionSourceEl = document.getElementById('motionSource');
-const camEl = document.getElementById('cam');
+
 
 const VALID_MODES = ['idle', 'focus', 'break', 'alert'];
 
@@ -52,7 +51,7 @@ function describeMode(value){
   const normalized = normalizeMode(value);
   return {
     normalized,
-    label: normalized.charAt(0).toUpperCase() + normalized.slice(1)
+
   };
 }
 
@@ -155,6 +154,70 @@ function updateModeDisplay(modeValue){
   return info.normalized;
 }
 
+function setPresetStatus(message = '', isError = false){
+  if(!presetStatus){
+    return;
+  }
+  presetStatus.textContent = message;
+  if(isError){
+    presetStatus.classList.add('error');
+  }else{
+    presetStatus.classList.remove('error');
+  }
+}
+
+function updatePresetButtons(activeMode){
+  if(!presetButtons.length){
+    return;
+  }
+  const normalized = normalizeMode(activeMode);
+  for(const btn of presetButtons){
+    const target = normalizeMode(btn.dataset.mode);
+    const isActive = target === normalized;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  }
+}
+
+function bindPresetButtons(){
+  if(!presetButtons.length){
+    return;
+  }
+  for(const btn of presetButtons){
+    btn.addEventListener('click', async ()=>{
+      const desiredInfo = describeMode(btn.dataset.mode);
+      setPresetStatus(`Atualizando para ${desiredInfo.label}...`);
+      btn.disabled = true;
+      try{
+        const response = await fetch('/api/mode', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode: desiredInfo.normalized})
+        });
+        if(!response.ok){
+          throw new Error(`HTTP ${response.status}`);
+        }
+        let payload = {};
+        try{
+          payload = await response.json();
+        }catch(_err){
+          payload = {};
+        }
+        const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
+        setCorgi(next, 0);
+        updatePresetButtons(next);
+        const nextLabel = describeMode(next).label;
+        setPresetStatus(`Modo definido para ${nextLabel}.`);
+      }catch(err){
+        console.error('Failed to set mode', err);
+        setPresetStatus('Não foi possível atualizar o modo agora.', true);
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
 function updateSense(senseData){
   const sense = ensureObject(senseData);
   tempEl.textContent = formatNumber(sense.temperature);
@@ -231,12 +294,6 @@ function updateMotion(lines, source){
   }
 }
 
-function refreshCamera(){
-  if(!camEl){
-    return;
-  }
-  const base = '/camera.jpg';
-  camEl.src = `${base}?ts=${Date.now()}`;
 }
 
 function applyStatus(payload){
@@ -295,18 +352,9 @@ async function initWS(){
     console.error('WS init failed', e);
   }
 }
-
-updateModeDisplay('idle');
 updatePresetButtons('idle');
 setPresetStatus('');
 bindPresetButtons();
-
-updateSense({});
-updatePosture({});
-updateTasks({});
-updateMotion([], '');
-refreshCamera();
-
 tickClock();
 setInterval(tickClock, 500);
 refreshOnce();

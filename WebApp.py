@@ -343,20 +343,6 @@ INDEX_HTML = """<!DOCTYPE html>
       <div class="measure"><span>Press.</span><b id="pres">--</b><span>hPa</span></div>
       <div class="availability" id="senseAvail"></div>
     </section>
-
-    <section class="panel posture">
-      <h3>Postura</h3>
-      <div class="stats-row">
-        <div class="stat">
-          <span>Eventos</span>
-          <b id="postureEvents">0</b>
-        </div>
-        <div class="stat">
-          <span>Ajustes</span>
-          <b id="postureAdjust">0</b>
-        </div>
-      </div>
-      <ul class="event-list" id="postureRecent"></ul>
     </section>
 
     <section class="panel camera">
@@ -412,9 +398,6 @@ const tasksCompletedEl = document.getElementById('tasksCompleted');
 const tasksCreatedEl = document.getElementById('tasksCreated');
 const tasksListEl = document.getElementById('tasksRecent');
 const motionEl = document.getElementById('motion');
-const motionSourceEl = document.getElementById('motionSource');
-const camEl = document.getElementById('cam');
-
 const VALID_MODES = ['idle', 'focus', 'break', 'alert'];
 
 function isPresent(value){
@@ -450,7 +433,7 @@ function describeMode(value){
   const normalized = normalizeMode(value);
   return {
     normalized,
-    label: normalized.charAt(0).toUpperCase() + normalized.slice(1)
+
   };
 }
 
@@ -553,6 +536,70 @@ function updateModeDisplay(modeValue){
   return info.normalized;
 }
 
+function setPresetStatus(message = '', isError = false){
+  if(!presetStatus){
+    return;
+  }
+  presetStatus.textContent = message;
+  if(isError){
+    presetStatus.classList.add('error');
+  }else{
+    presetStatus.classList.remove('error');
+  }
+}
+
+function updatePresetButtons(activeMode){
+  if(!presetButtons.length){
+    return;
+  }
+  const normalized = normalizeMode(activeMode);
+  for(const btn of presetButtons){
+    const target = normalizeMode(btn.dataset.mode);
+    const isActive = target === normalized;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  }
+}
+
+function bindPresetButtons(){
+  if(!presetButtons.length){
+    return;
+  }
+  for(const btn of presetButtons){
+    btn.addEventListener('click', async ()=>{
+      const desiredInfo = describeMode(btn.dataset.mode);
+      setPresetStatus(`Atualizando para ${desiredInfo.label}...`);
+      btn.disabled = true;
+      try{
+        const response = await fetch('/api/mode', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode: desiredInfo.normalized})
+        });
+        if(!response.ok){
+          throw new Error(`HTTP ${response.status}`);
+        }
+        let payload = {};
+        try{
+          payload = await response.json();
+        }catch(_err){
+          payload = {};
+        }
+        const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
+        setCorgi(next, 0);
+        updatePresetButtons(next);
+        const nextLabel = describeMode(next).label;
+        setPresetStatus(`Modo definido para ${nextLabel}.`);
+      }catch(err){
+        console.error('Failed to set mode', err);
+        setPresetStatus('Não foi possível atualizar o modo agora.', true);
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
 function updateSense(senseData){
   const sense = ensureObject(senseData);
   tempEl.textContent = formatNumber(sense.temperature);
@@ -628,13 +675,6 @@ function updateMotion(lines, source){
     motionSourceEl.textContent = source ? `Fonte: ${source}` : '';
   }
 }
-
-function refreshCamera(){
-  if(!camEl){
-    return;
-  }
-  const base = '/camera.jpg';
-  camEl.src = `${base}?ts=${Date.now()}`;
 }
 
 function applyStatus(payload){
@@ -694,16 +734,9 @@ async function initWS(){
   }
 }
 
-updateModeDisplay('idle');
 updatePresetButtons('idle');
 setPresetStatus('');
 bindPresetButtons();
-
-updateSense({});
-updatePosture({});
-updateTasks({});
-updateMotion([], '');
-refreshCamera();
 
 tickClock();
 setInterval(tickClock, 500);
@@ -721,152 +754,11 @@ STYLES_CSS = """:root{
 }
 
 *{ box-sizing:border-box; }
-html,body{
-  margin:0;
-  min-height:100%;
-  background:var(--bg);
-  color:var(--text);
-  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Ubuntu,"Helvetica Neue",Arial,"Noto Sans","Apple Color Emoji","Segoe UI Emoji";
-}
-
-a{ color:var(--accent); }
-
-.topbar{
-  display:grid;
-  grid-template-columns:auto 1fr auto;
-  align-items:center;
-  gap:12px;
-  padding:12px 16px;
-  background:#0c131b;
-  position:sticky;
-  top:0;
-  z-index:10;
-  box-shadow:0 2px 12px rgba(0,0,0,.35);
-}
-.brand{ font-weight:700; letter-spacing:.3px; }
-.mode-pill{
-  justify-self:center;
-  padding:6px 14px;
-  border-radius:999px;
-  background:rgba(63,169,245,0.15);
-  color:var(--accent);
-  font-weight:600;
-  font-size:0.95rem;
-}
-.clock{ justify-self:end; color:var(--muted); font-variant-numeric:tabular-nums; }
-
-.grid{
-  display:grid;
-  grid-template-columns:repeat(12, 1fr);
-  gap:14px;
-  padding:14px;
-  align-items:start;
-}
-
-.panel{
-  background:var(--panel);
-  border:1px solid #152033;
-  border-radius:14px;
-  padding:14px;
-  box-shadow:0 6px 18px rgba(0,0,0,.22);
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-}
-
-.panel h3{ margin:0; font-size:1.05rem; }
-
-.mode-panel{ grid-column:span 4; }
-.measures{ grid-column:span 4; }
-.posture{ grid-column:span 4; }
-.camera{ grid-column:span 6; }
-.tasks{ grid-column:span 6; }
-.motion{ grid-column:span 12; }
-
-.preset-hint{ margin:0; color:var(--muted); font-size:.9rem; }
-.preset-list{ display:flex; flex-wrap:wrap; gap:8px; }
-.preset-btn{
-  flex:1 1 calc(50% - 8px);
-  min-width:120px;
-  padding:10px 12px;
-  border-radius:10px;
-  border:1px solid #1b2940;
-  background:transparent;
-  color:var(--text);
-  font-size:1rem;
-  cursor:pointer;
-  transition:background .2s ease, border-color .2s ease, color .2s ease, transform .2s ease;
-}
 .preset-btn:hover{ background:rgba(63,169,245,0.12); border-color:var(--accent); transform:translateY(-1px); }
 .preset-btn:active{ transform:translateY(0); }
 .preset-btn.active{ background:var(--accent); color:#071019; border-color:var(--accent); box-shadow:0 6px 16px rgba(63,169,245,0.35); }
 .preset-btn:disabled{ opacity:.55; cursor:not-allowed; }
 .preset-status{ min-height:1.2em; font-size:.85rem; color:var(--muted); }
-.preset-status.error{ color:var(--warn); }
-
-.measure{ display:flex; align-items:baseline; gap:6px; margin:4px 0; }
-.measure span:first-child{ width:54px; color:var(--muted); }
-.measure b{ font-size:1.35rem; }
-.availability{ color:var(--muted); font-size:.9rem; }
-
-.stats-row{ display:flex; flex-wrap:wrap; gap:10px; }
-.stat{
-  background:rgba(63,169,245,0.08);
-  border:1px solid rgba(63,169,245,0.2);
-  border-radius:10px;
-  padding:8px 12px;
-  min-width:110px;
-  display:flex;
-  flex-direction:column;
-  gap:2px;
-}
-.stat span{ color:var(--muted); font-size:.85rem; }
-.stat b{ font-size:1.25rem; }
-
-.event-list{
-  list-style:none;
-  margin:0;
-  padding:0;
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  max-height:220px;
-  overflow:auto;
-}
-.event-item{
-  background:#0b1220;
-  border:1px solid #1a2a42;
-  border-radius:10px;
-  padding:8px 10px;
-  color:var(--muted);
-  line-height:1.35;
-}
-.event-item.warn{ border-color:rgba(255,154,154,0.45); color:#ffd7d7; background:#1f1416; }
-.event-item.empty{ text-align:center; font-style:italic; }
-
-.camera img{ width:100%; border-radius:12px; border:1px solid #1b2940; object-fit:cover; }
-
-.motion-source{ color:var(--muted); font-size:.85rem; }
-.motion pre{
-  white-space:pre-wrap;
-  max-height:260px;
-  overflow:auto;
-  color:#cfe3ff;
-  background:#0b1220;
-  padding:10px;
-  border-radius:10px;
-  border:1px solid #152033;
-}
-
-.foot{ text-align:center; color:var(--muted); padding:10px 0 18px; font-size:.9rem; }
-
-@media (max-width: 960px){
-  .grid{ grid-template-columns:repeat(8, 1fr); }
-  .mode-panel{ grid-column:span 8; }
-  .measures{ grid-column:span 4; }
-  .posture{ grid-column:span 4; }
-  .camera{ grid-column:span 8; }
-  .tasks{ grid-column:span 8; }
 }
 
 @media (max-width: 720px){
