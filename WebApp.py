@@ -136,6 +136,17 @@ _current_mode: Mode = Mode.IDLE
 # Try to import a mode provider from your project if present
 # Expose a lightweight getter so the UI reflects your real state.
 
+def _normalize_mode_value(value: str | Mode | None) -> Mode:
+    """Normalize incoming mode values into the :class:`Mode` enum."""
+
+    if isinstance(value, Mode):
+        return value
+    if value is None:
+        raise ValueError("Mode value cannot be None")
+    candidate = str(value).strip().upper()
+    return Mode(candidate)
+
+
 def get_current_mode() -> str:
     global _current_mode
     try:
@@ -145,14 +156,14 @@ def get_current_mode() -> str:
         pass
     except Exception:
         pass
-    return str(_current_mode)
+    return _current_mode.value
 
 # Allow updating mode from elsewhere in your code
 
 def set_mode(new_mode: str | Mode) -> None:
     global _current_mode
     try:
-        _current_mode = Mode(str(new_mode))
+        _current_mode = _normalize_mode_value(new_mode)
     except Exception:
         _current_mode = Mode.IDLE
 
