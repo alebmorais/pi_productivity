@@ -2,18 +2,18 @@
 main.py — pi_productivity
 
 Adds a FastAPI-based web app that runs alongside your existing pipeline.
-- Shows Sense HAT diagnostics (or graceful fallbacks when not present)
-- Shows current mode (pulls from your project if available)
-- Shows camera preview endpoint
-- Shows Motion events/tasks (tails motion log)
-- Cute responsive Corgi mascot reacts to activity/mode
+- Mostra diagnósticos do Sense HAT (ou valores simulados quando não houver hardware)
+- Exibe o modo atual e permite trocar manualmente via presets na interface
+- Mostra a câmera (captura ao vivo ou fallback do arquivo last_posture.jpg)
+- Resume ajustes de postura e tarefas Motion lendo os CSVs em ~/pi_productivity/logs
+- Lê eventos recentes do Motion tentando detectar automaticamente o caminho do log
 
 How it works
 ------------
-• On startup, this file also writes minimal front-end assets to ./web/ (index.html, app.js, styles.css, corgi.svg) if they don't exist, so you can keep a single-file entrypoint.
+• On startup, este arquivo também gera os assets básicos em ./web/ (index.html, app.js, styles.css) caso não existam.
 • The web app runs on 0.0.0.0 (LAN-accessible) at port 8090 by default (override via env WEBAPP_PORT).
 • The server runs in a background thread so your other tasks can continue to run.
-• When the window is narrow/small, the UI collapses to only Corgi + measures + time.
+• Em telas pequenas a UI reorganiza os cartões para caber em uma única coluna.
 
 Requirements (install as needed)
 --------------------------------
@@ -38,6 +38,8 @@ Motion events
 
 from __future__ import annotations
 import asyncio
+import csv
+import math
 import os
 import io
 try:
@@ -48,11 +50,11 @@ import json
 import time
 import enum
 import threading
+from collections import deque
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, List
-from xml.etree import ElementTree as ET
+from typing import Any, Dict, Optional, List, Iterable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
@@ -65,9 +67,22 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 WEB_DIR = Path(__file__).parent / "web"
 TEMPLATES_DIR = WEB_DIR
 STATIC_DIR = WEB_DIR / "static"
-MOTION_LOG = Path("/var/log/motion/motion.log")  # adjust if needed
 PORT = int(os.getenv("WEBAPP_PORT", "8090"))
 HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
+
+_DEFAULT_PROJECT_ROOT = Path.home() / "pi_productivity"
+PROJECT_ROOT = Path(os.getenv("PI_PRODUCTIVITY_DIR", str(_DEFAULT_PROJECT_ROOT))).expanduser()
+LOG_DIR = Path(os.getenv("PI_PRODUCTIVITY_LOG_DIR", str(PROJECT_ROOT / "logs"))).expanduser()
+POSTURE_CSV = Path(os.getenv("PI_PRODUCTIVITY_POSTURE_CSV", str(LOG_DIR / "posture_events.csv"))).expanduser()
+TASK_CSV = Path(os.getenv("PI_PRODUCTIVITY_TASK_CSV", str(LOG_DIR / "task_events.csv"))).expanduser()
+LAST_POSTURE_JPEG = Path(os.getenv("PI_PRODUCTIVITY_POSTURE_JPEG", str(PROJECT_ROOT / "last_posture.jpg"))).expanduser()
+
+_motion_env = os.getenv("MOTION_LOG_PATH", "").strip()
+_motion_candidates: List[Path] = []
+if _motion_env:
+    _motion_candidates.append(Path(_motion_env).expanduser())
+_motion_candidates.append(LOG_DIR / "motion.log")
+_motion_candidates.append(Path("/var/log/motion/motion.log"))
 
 WEB_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -161,25 +176,36 @@ class Camera:
             self.cap = None
 
     def read_jpeg(self) -> Optional[bytes]:
-        if cv2 is None:
-            return None
-        with self.lock:
-            if not self.cap:
-                self._open()
+        if cv2 is not None:
+            with self.lock:
                 if not self.cap:
-                    return None
-            ok, frame = self.cap.read()
-            if not ok:
-                return None
-            ok, buf = cv2.imencode(".jpg", frame)
-            if not ok:
-                return None
-            return bytes(buf)
+                    self._open()
+                if self.cap:
+                    ok, frame = self.cap.read()
+                    if ok:
+                        ok, buf = cv2.imencode(".jpg", frame)
+                        if ok:
+                            return bytes(buf)
+        return self._read_snapshot()
+
+    def _read_snapshot(self) -> Optional[bytes]:
+        candidates = [LAST_POSTURE_JPEG, PROJECT_ROOT / "last_posture.jpg"]
+        for path in candidates:
+            if path and path.exists():
+                try:
+                    return path.read_bytes()
+                except Exception:
+                    continue
+        return None
 
 # ---------------- Motion log tail ----------------
 class MotionTailer:
-    def __init__(self, path: Path, max_lines: int = 50):
-        self.path = path
+    def __init__(self, paths: Iterable[Path], max_lines: int = 50):
+        candidates = [Path(p) for p in paths if str(p)]
+        if not candidates:
+            candidates = [Path("/var/log/motion/motion.log")]
+        self.paths = candidates
+        self.current_path: Optional[Path] = None
         self.max_lines = max_lines
         self.lines: List[str] = []
         self._stop = threading.Event()
@@ -194,28 +220,39 @@ class MotionTailer:
     def snapshot(self) -> List[str]:
         return list(self.lines[-self.max_lines :])
 
+    def _resolve_path(self) -> Optional[Path]:
+        for candidate in self.paths:
+            if candidate.exists():
+                return candidate
+        return self.paths[0] if self.paths else None
+
     def _run(self):
         try:
-            # On first run, read last max_lines from file if present
-            if self.path.exists():
-                with self.path.open("r", errors="ignore") as f:
-                    self.lines = f.readlines()[-self.max_lines :]
-            # Follow the file
             while not self._stop.is_set():
-                if not self.path.exists():
+                path = self._resolve_path()
+                if not path or not path.exists():
+                    self.current_path = path
                     time.sleep(1)
                     continue
-                with self.path.open("r", errors="ignore") as f:
-                    f.seek(0, os.SEEK_END)
-                    while not self._stop.is_set():
-                        pos = f.tell()
-                        line = f.readline()
-                        if not line:
-                            time.sleep(0.5)
-                            f.seek(pos)
-                        else:
-                            self.lines.append(line.rstrip())
-                            self.lines = self.lines[-(self.max_lines * 2) :]
+                self.current_path = path
+                try:
+                    with path.open("r", errors="ignore") as f:
+                        if not self.lines:
+                            self.lines = f.readlines()[-self.max_lines :]
+                        f.seek(0, os.SEEK_END)
+                        while not self._stop.is_set():
+                            pos = f.tell()
+                            line = f.readline()
+                            if not line:
+                                time.sleep(0.5)
+                                f.seek(pos)
+                                if path != self._resolve_path():
+                                    break
+                            else:
+                                self.lines.append(line.rstrip())
+                                self.lines = self.lines[-(self.max_lines * 2) :]
+                except Exception:
+                    time.sleep(1)
         except Exception:
             # Keep quiet; UI will just show nothing
             pass
@@ -248,7 +285,7 @@ class Broadcaster:
 
 sense = SenseFacade()
 camera = Camera(index=0)
-motion = MotionTailer(MOTION_LOG, max_lines=100)
+motion = MotionTailer(_motion_candidates, max_lines=100)
 bus = Broadcaster()
 
 # ---------------- FastAPI setup ----------------
@@ -272,7 +309,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---------------- Assets (written once) ----------------
 INDEX_HTML = """<!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -281,52 +318,104 @@ INDEX_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🐾 pi_productivity</div>
+    <div class="brand">pi_productivity</div>
+    <div class="mode-pill" id="mode">Modo: ...</div>
     <div class="clock" id="clock"></div>
   </header>
 
   <main class="grid">
-    <section class="panel corgi-panel">
-      <img id="corgi" src="/dog.svg?mode=idle" alt="Dog mascot" />
-      <div class="mode" id="mode">Mode: ...</div>
+    <section class="panel mode-panel">
+      <h3>Presets de modo</h3>
+      <p class="preset-hint">Troque o modo manualmente quando não estiver usando o joystick.</p>
+      <div class="preset-list">
+        <button type="button" class="preset-btn" data-mode-btn data-mode="idle">Idle</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="focus">Focus</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="break">Break</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="alert">Alert</button>
+      </div>
+      <div class="preset-status" id="presetStatus"></div>
     </section>
 
     <section class="panel measures">
-      <h3>Measures</h3>
+      <h3>Sense HAT</h3>
       <div class="measure"><span>Temp</span><b id="temp">--</b><span>°C</span></div>
-      <div class="measure"><span>Humidity</span><b id="hum">--</b><span>%</span></div>
-      <div class="measure"><span>Pressure</span><b id="pres">--</b><span>hPa</span></div>
+      <div class="measure"><span>Umid.</span><b id="hum">--</b><span>%</span></div>
+      <div class="measure"><span>Press.</span><b id="pres">--</b><span>hPa</span></div>
       <div class="availability" id="senseAvail"></div>
     </section>
 
+    <section class="panel posture">
+      <h3>Postura</h3>
+      <div class="stats-row">
+        <div class="stat">
+          <span>Eventos</span>
+          <b id="postureEvents">0</b>
+        </div>
+        <div class="stat">
+          <span>Ajustes</span>
+          <b id="postureAdjust">0</b>
+        </div>
+      </div>
+      <ul class="event-list" id="postureRecent"></ul>
+    </section>
+
     <section class="panel camera">
-      <h3>Camera</h3>
-      <img id="cam" src="/camera.jpg" alt="Camera" />
+      <h3>Última captura</h3>
+      <img id="cam" src="/camera.jpg" alt="Última captura da câmera" />
+    </section>
+
+    <section class="panel tasks">
+      <h3>Tarefas Motion</h3>
+      <div class="stats-row">
+        <div class="stat">
+          <span>Total</span>
+          <b id="tasksTotal">0</b>
+        </div>
+        <div class="stat">
+          <span>Concluídas</span>
+          <b id="tasksCompleted">0</b>
+        </div>
+        <div class="stat">
+          <span>Criadas</span>
+          <b id="tasksCreated">0</b>
+        </div>
+      </div>
+      <ul class="event-list" id="tasksRecent"></ul>
     </section>
 
     <section class="panel motion">
-      <h3>Motion tasks/events</h3>
+      <h3>Log do Motion</h3>
+      <div class="motion-source" id="motionSource"></div>
       <pre id="motion"></pre>
     </section>
   </main>
 
-  <footer class="foot">Made with FastAPI • Resize window to see compact mode</footer>
+  <footer class="foot">Feito com FastAPI • Atualiza automaticamente a cada poucos segundos</footer>
   <script src="/static/app.js"></script>
 </body>
 </html>
 """
 
-APP_JS = """
-const clock = document.getElementById('clock');
+APP_JS = """const clock = document.getElementById('clock');
+const modeEl = document.getElementById('mode');
+const presetButtons = Array.from(document.querySelectorAll('[data-mode-btn]'));
+const presetStatus = document.getElementById('presetStatus');
 const tempEl = document.getElementById('temp');
 const humEl = document.getElementById('hum');
 const presEl = document.getElementById('pres');
 const senseAvail = document.getElementById('senseAvail');
+const postureEventsEl = document.getElementById('postureEvents');
+const postureAdjustEl = document.getElementById('postureAdjust');
+const postureListEl = document.getElementById('postureRecent');
+const tasksTotalEl = document.getElementById('tasksTotal');
+const tasksCompletedEl = document.getElementById('tasksCompleted');
+const tasksCreatedEl = document.getElementById('tasksCreated');
+const tasksListEl = document.getElementById('tasksRecent');
 const motionEl = document.getElementById('motion');
-const modeEl = document.getElementById('mode');
-const corgi = document.getElementById('corgi');
+const motionSourceEl = document.getElementById('motionSource');
+const camEl = document.getElementById('cam');
 
-const VALID_MODES = ['idle','focus','break','alert'];
+const VALID_MODES = ['idle', 'focus', 'break', 'alert'];
 
 function isPresent(value){
   return value !== undefined && value !== null;
@@ -357,20 +446,39 @@ function normalizeMode(value){
   return 'idle';
 }
 
-function formatNumber(value){
-  const num = Number(value);
-  return Number.isFinite(num) ? num.toFixed(1) : '--';
+function describeMode(value){
+  const normalized = normalizeMode(value);
+  return {
+    normalized,
+    label: normalized.charAt(0).toUpperCase() + normalized.slice(1)
+  };
 }
 
-function dogUrl(state, activity){
-  const mode = encodeURIComponent(normalizeMode(state));
-  let act = Number(activity);
-  if(!Number.isFinite(act)){
-    act = 0;
+function formatNumber(value){
+  const num = Number(value);
+  if(!Number.isFinite(num)){
+    return '--';
   }
-  act = Math.max(0, Math.min(1, act));
-  const ts = Date.now();
-  return `/dog.svg?mode=${mode}&activity=${act.toFixed(2)}&ts=${ts}`;
+  return num.toFixed(1);
+}
+
+function formatInt(value){
+  const num = Number.parseInt(value, 10);
+  if(!Number.isFinite(num)){
+    return '0';
+  }
+  return String(num);
+}
+
+function formatTimestamp(value){
+  if(!value){
+    return '—';
+  }
+  const parsed = new Date(value);
+  if(Number.isNaN(parsed.getTime())){
+    return String(value);
+  }
+  return parsed.toLocaleString();
 }
 
 function tickClock(){
@@ -378,12 +486,71 @@ function tickClock(){
   clock.textContent = now.toLocaleString();
 }
 
-function setCorgi(state, activity){
-  const next = normalizeMode(state);
-  corgi.classList.remove('idle','focus','break','alert');
-  corgi.classList.add(next);
-  corgi.src = dogUrl(next, activity);
-  corgi.dataset.mode = next;
+function setPresetStatus(message = '', isError = false){
+  if(!presetStatus){
+    return;
+  }
+  presetStatus.textContent = message;
+  presetStatus.classList.toggle('error', Boolean(isError));
+}
+
+function updatePresetButtons(activeMode){
+  if(!presetButtons.length){
+    return;
+  }
+  const normalized = normalizeMode(activeMode);
+  for(const btn of presetButtons){
+    const target = normalizeMode(btn.dataset.mode);
+    const isActive = target === normalized;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  }
+}
+
+function bindPresetButtons(){
+  if(!presetButtons.length){
+    return;
+  }
+  for(const btn of presetButtons){
+    btn.addEventListener('click', async ()=>{
+      const desiredInfo = describeMode(btn.dataset.mode);
+      setPresetStatus(`Atualizando para ${desiredInfo.label}...`);
+      btn.disabled = true;
+      try{
+        const response = await fetch('/api/mode', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode: desiredInfo.normalized})
+        });
+        if(!response.ok){
+          throw new Error(`HTTP ${response.status}`);
+        }
+        let payload = {};
+        try{
+          payload = await response.json();
+        }catch(_err){
+          payload = {};
+        }
+        const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
+        updatePresetButtons(next);
+        const nextLabel = describeMode(next).label;
+        setPresetStatus(`Modo definido para ${nextLabel}.`);
+      }catch(err){
+        console.error('Failed to set mode', err);
+        setPresetStatus('Não foi possível atualizar o modo agora.', true);
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
+function updateModeDisplay(modeValue){
+  const info = describeMode(modeValue);
+  if(modeEl){
+    modeEl.textContent = `Modo: ${info.label}`;
+  }
+  return info.normalized;
 }
 
 function updateSense(senseData){
@@ -393,24 +560,81 @@ function updateSense(senseData){
   presEl.textContent = formatNumber(sense.pressure);
 
   if(sense.available){
-    senseAvail.textContent = 'Sense HAT available';
+    senseAvail.textContent = 'Sense HAT disponível';
   }else if(hasOwn(sense, 'error') && isPresent(sense.error)){
     senseAvail.textContent = String(sense.error);
   }else{
-    senseAvail.textContent = 'Sense HAT unavailable';
+    senseAvail.textContent = 'Sense HAT indisponível';
   }
 }
 
-function updateMotion(lines){
-  const list = ensureArray(lines).map((item)=>String(item));
-  motionEl.textContent = list.length ? list.join('\n') : 'No recent motion events.';
+function renderList(element, items, fallbackText, decorate){
+  if(!element){
+    return;
+  }
+  element.textContent = '';
+  if(!items.length){
+    const li = document.createElement('li');
+    li.className = 'event-item empty';
+    li.textContent = fallbackText;
+    element.appendChild(li);
+    return;
+  }
+  for(const item of items){
+    const li = document.createElement('li');
+    li.className = 'event-item';
+    decorate(li, item);
+    element.appendChild(li);
+  }
 }
 
-function updateModeDisplay(modeValue){
-  const normalized = normalizeMode(modeValue);
-  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
-  modeEl.textContent = `Mode: ${label}`;
-  return normalized;
+function updatePosture(data){
+  const info = ensureObject(data);
+  postureEventsEl.textContent = formatInt(info.total_events);
+  postureAdjustEl.textContent = formatInt(info.adjustments);
+  const items = ensureArray(info.recent);
+  renderList(postureListEl, items, 'Nenhum evento recente.', (li, entry)=>{
+    const ok = Boolean(entry && entry.ok);
+    const ts = formatTimestamp(entry && entry.timestamp);
+    const reason = entry && entry.reason ? ` · ${entry.reason}` : '';
+    const tilt = entry && Number.isFinite(Number(entry.tilt)) ? ` · tilt ${Number(entry.tilt).toFixed(1)}°` : '';
+    const nod = entry && Number.isFinite(Number(entry.nod)) ? ` · nod ${Number(entry.nod).toFixed(1)}°` : '';
+    li.textContent = `${ts} • ${ok ? 'OK' : 'Ajuste'}${reason}${tilt}${nod}`;
+    if(!ok){
+      li.classList.add('warn');
+    }
+  });
+}
+
+function updateTasks(data){
+  const info = ensureObject(data);
+  tasksTotalEl.textContent = formatInt(info.total_events);
+  tasksCompletedEl.textContent = formatInt(info.completed);
+  tasksCreatedEl.textContent = formatInt(info.created);
+  const items = ensureArray(info.recent);
+  renderList(tasksListEl, items, 'Nenhum evento recente.', (li, entry)=>{
+    const ts = formatTimestamp(entry && entry.timestamp);
+    const action = entry && entry.action ? String(entry.action).toUpperCase() : 'EVENTO';
+    const section = entry && entry.section_title ? ` · ${entry.section_title}` : '';
+    const name = entry && entry.task_name ? ` — ${entry.task_name}` : '';
+    li.textContent = `${ts} • ${action}${section}${name}`;
+  });
+}
+
+function updateMotion(lines, source){
+  const list = ensureArray(lines).map((item)=>String(item));
+  motionEl.textContent = list.length ? list.join('\n') : 'Nenhum evento recente do Motion.';
+  if(motionSourceEl){
+    motionSourceEl.textContent = source ? `Fonte: ${source}` : '';
+  }
+}
+
+function refreshCamera(){
+  if(!camEl){
+    return;
+  }
+  const base = '/camera.jpg';
+  camEl.src = `${base}?ts=${Date.now()}`;
 }
 
 function applyStatus(payload){
@@ -418,11 +642,12 @@ function applyStatus(payload){
     return;
   }
   const normalizedMode = updateModeDisplay(payload.mode);
-  const activity = Number(payload.activity_level);
-  const activityValue = Number.isFinite(activity) ? activity : 0;
-  setCorgi(normalizedMode, activityValue);
+  updatePresetButtons(normalizedMode);
   updateSense(payload.sense);
-  updateMotion(payload.motion);
+  updatePosture(payload.posture);
+  updateTasks(payload.tasks);
+  updateMotion(payload.motion, payload.motion_source);
+  refreshCamera();
 }
 
 async function refreshOnce(){
@@ -434,13 +659,13 @@ async function refreshOnce(){
     }
     const j = await r.json();
     applyStatus(j);
-  }catch(e){
-    console.error(e);
+  }catch(err){
+    console.error('Initial refresh failed', err);
   }
 }
 
 function handleEnvelope(message){
-  if(!message || typeof message !== 'object'){
+  if(!message){
     return;
   }
   if(hasOwn(message, 'kind') && message.kind === 'tick'){
@@ -469,313 +694,288 @@ async function initWS(){
   }
 }
 
+updateModeDisplay('idle');
+updatePresetButtons('idle');
+setPresetStatus('');
+bindPresetButtons();
+
+updateSense({});
+updatePosture({});
+updateTasks({});
+updateMotion([], '');
+refreshCamera();
+
 tickClock();
 setInterval(tickClock, 500);
 refreshOnce();
 initWS();
 """
 
-STYLES_CSS = """
-:root{ --bg:#0b0f14; --panel:#0f1720; --text:#e6edf3; --muted:#9fb0c0; --accent:#3fa9f5; }
+STYLES_CSS = """:root{
+  --bg:#0b0f14;
+  --panel:#0f1720;
+  --text:#e6edf3;
+  --muted:#9fb0c0;
+  --accent:#3fa9f5;
+  --warn:#ff9a9a;
+}
+
 *{ box-sizing:border-box; }
-html,body{ margin:0; height:100%; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Ubuntu, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; }
-.topbar{ display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#0c131b; position:sticky; top:0; z-index:10; box-shadow:0 2px 8px rgba(0,0,0,.3) }
-.brand{ font-weight:700; letter-spacing:.3px }
-.clock{ color:var(--muted); font-variant-numeric:tabular-nums }
-.grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; padding:12px; }
-.panel{ background:var(--panel); border:1px solid #152033; border-radius:14px; padding:12px; box-shadow:0 6px 20px rgba(0,0,0,.25); }
-.corgi-panel{ grid-column: span 4; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-.corgi-panel img{ width:100%; max-width:280px; transition: transform .4s ease; filter: drop-shadow(0 10px 25px rgba(0,0,0,.35)); }
-.corgi-panel img.idle{ transform: translateY(0px); }
-.corgi-panel img.focus{ transform: translateY(-6px) scale(1.02); }
-.corgi-panel img.break{ transform: translateY(2px) scale(.98); filter: grayscale(.2) brightness(.9); }
-.corgi-panel img.alert{ animation: wiggle .18s ease-in-out 0s 8 alternate; }
-@keyframes wiggle{ from{ transform: rotate(-6deg)} to{ transform: rotate(6deg)} }
-.corgi-panel .mode{ margin-top:8px; color:var(--muted) }
+html,body{
+  margin:0;
+  min-height:100%;
+  background:var(--bg);
+  color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Ubuntu,"Helvetica Neue",Arial,"Noto Sans","Apple Color Emoji","Segoe UI Emoji";
+}
 
-.measures{ grid-column: span 3; }
-.measures h3{ margin:2px 0 10px }
-.measure{ display:flex; align-items:baseline; gap:6px; margin:4px 0 }
-.measure b{ font-size:1.3rem }
-.availability{ margin-top:6px; color:var(--muted) }
+a{ color:var(--accent); }
 
-.camera{ grid-column: span 5; }
-.camera img{ width:100%; border-radius:10px; border:1px solid #1b2940 }
+.topbar{
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  align-items:center;
+  gap:12px;
+  padding:12px 16px;
+  background:#0c131b;
+  position:sticky;
+  top:0;
+  z-index:10;
+  box-shadow:0 2px 12px rgba(0,0,0,.35);
+}
+.brand{ font-weight:700; letter-spacing:.3px; }
+.mode-pill{
+  justify-self:center;
+  padding:6px 14px;
+  border-radius:999px;
+  background:rgba(63,169,245,0.15);
+  color:var(--accent);
+  font-weight:600;
+  font-size:0.95rem;
+}
+.clock{ justify-self:end; color:var(--muted); font-variant-numeric:tabular-nums; }
 
-.motion{ grid-column: span 12; }
-.motion pre{ white-space: pre-wrap; max-height: 260px; overflow:auto; color:#cfe3ff; background:#0b1220; padding:10px; border-radius:10px; border:1px solid #152033 }
+.grid{
+  display:grid;
+  grid-template-columns:repeat(12, 1fr);
+  gap:14px;
+  padding:14px;
+  align-items:start;
+}
 
-.foot{ text-align:center; color:var(--muted); padding:8px 0 16px }
+.panel{
+  background:var(--panel);
+  border:1px solid #152033;
+  border-radius:14px;
+  padding:14px;
+  box-shadow:0 6px 18px rgba(0,0,0,.22);
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
 
-/* Compact mode: when small, show only corgi + measures */
-@media (max-width: 680px){
-  .grid{ grid-template-columns: repeat(4, 1fr); }
-  .camera{ display:none }
-  .motion{ display:none }
-  .corgi-panel{ grid-column: span 4; }
-  .measures{ grid-column: span 4; }
+.panel h3{ margin:0; font-size:1.05rem; }
+
+.mode-panel{ grid-column:span 4; }
+.measures{ grid-column:span 4; }
+.posture{ grid-column:span 4; }
+.camera{ grid-column:span 6; }
+.tasks{ grid-column:span 6; }
+.motion{ grid-column:span 12; }
+
+.preset-hint{ margin:0; color:var(--muted); font-size:.9rem; }
+.preset-list{ display:flex; flex-wrap:wrap; gap:8px; }
+.preset-btn{
+  flex:1 1 calc(50% - 8px);
+  min-width:120px;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid #1b2940;
+  background:transparent;
+  color:var(--text);
+  font-size:1rem;
+  cursor:pointer;
+  transition:background .2s ease, border-color .2s ease, color .2s ease, transform .2s ease;
+}
+.preset-btn:hover{ background:rgba(63,169,245,0.12); border-color:var(--accent); transform:translateY(-1px); }
+.preset-btn:active{ transform:translateY(0); }
+.preset-btn.active{ background:var(--accent); color:#071019; border-color:var(--accent); box-shadow:0 6px 16px rgba(63,169,245,0.35); }
+.preset-btn:disabled{ opacity:.55; cursor:not-allowed; }
+.preset-status{ min-height:1.2em; font-size:.85rem; color:var(--muted); }
+.preset-status.error{ color:var(--warn); }
+
+.measure{ display:flex; align-items:baseline; gap:6px; margin:4px 0; }
+.measure span:first-child{ width:54px; color:var(--muted); }
+.measure b{ font-size:1.35rem; }
+.availability{ color:var(--muted); font-size:.9rem; }
+
+.stats-row{ display:flex; flex-wrap:wrap; gap:10px; }
+.stat{
+  background:rgba(63,169,245,0.08);
+  border:1px solid rgba(63,169,245,0.2);
+  border-radius:10px;
+  padding:8px 12px;
+  min-width:110px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.stat span{ color:var(--muted); font-size:.85rem; }
+.stat b{ font-size:1.25rem; }
+
+.event-list{
+  list-style:none;
+  margin:0;
+  padding:0;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  max-height:220px;
+  overflow:auto;
+}
+.event-item{
+  background:#0b1220;
+  border:1px solid #1a2a42;
+  border-radius:10px;
+  padding:8px 10px;
+  color:var(--muted);
+  line-height:1.35;
+}
+.event-item.warn{ border-color:rgba(255,154,154,0.45); color:#ffd7d7; background:#1f1416; }
+.event-item.empty{ text-align:center; font-style:italic; }
+
+.camera img{ width:100%; border-radius:12px; border:1px solid #1b2940; object-fit:cover; }
+
+.motion-source{ color:var(--muted); font-size:.85rem; }
+.motion pre{
+  white-space:pre-wrap;
+  max-height:260px;
+  overflow:auto;
+  color:#cfe3ff;
+  background:#0b1220;
+  padding:10px;
+  border-radius:10px;
+  border:1px solid #152033;
+}
+
+.foot{ text-align:center; color:var(--muted); padding:10px 0 18px; font-size:.9rem; }
+
+@media (max-width: 960px){
+  .grid{ grid-template-columns:repeat(8, 1fr); }
+  .mode-panel{ grid-column:span 8; }
+  .measures{ grid-column:span 4; }
+  .posture{ grid-column:span 4; }
+  .camera{ grid-column:span 8; }
+  .tasks{ grid-column:span 8; }
+}
+
+@media (max-width: 720px){
+  .topbar{ grid-template-columns:1fr; text-align:center; }
+  .mode-pill{ justify-self:center; }
+  .clock{ justify-self:center; }
+  .grid{ grid-template-columns:repeat(4, 1fr); padding:12px; }
+  .mode-panel{ grid-column:span 4; }
+  .measures{ grid-column:span 4; }
+  .posture{ grid-column:span 4; }
+  .camera{ grid-column:span 4; }
+  .tasks{ grid-column:span 4; }
+  .motion{ grid-column:span 4; }
+  .preset-btn{ flex:1 1 100%; }
 }
 """
 
-DOG_VARIANTS: Dict[str, Dict[str, Any]] = {
-    "idle": {
-        "label": "Idle",
-        "bg": "#0f1720",
-        "body": "#f7b37f",
-        "belly": "#fff4e6",
-        "ear": "#ffd8b3",
-        "mask": "#3d2b1f",
-        "cheek": "#ffceb0",
-        "cheek_opacity": 0.5,
-        "tail": "#f7b37f",
-        "tail_tip": "#fff4e6",
-        "accent": "#3fa9f5",
-        "label_text": "#04111c",
-        "highlight": "#ffffff",
-        "highlight_opacity": 0.6,
-        "tuning": {
-            "tail_base": -12,
-            "tail_range": 25,
-            "ear_tilt": 0,
-            "ear_range": 14,
-            "eye_y": 110,
-            "eye_range": -6,
-            "eye_open": 14,
-            "eye_open_range": 0,
-            "mouth_y": 200,
-            "mouth_curve": 188,
-            "mouth_range": 6,
-            "nose_height": 26,
-            "nose_range": 2,
-        },
-    },
-    "focus": {
-        "label": "Focus",
-        "bg": "#061321",
-        "body": "#f5a96a",
-        "belly": "#ffe8d1",
-        "ear": "#ffcfa1",
-        "mask": "#2c1c16",
-        "cheek": "#ffbfa3",
-        "cheek_opacity": 0.45,
-        "tail": "#f5a96a",
-        "tail_tip": "#ffe8d1",
-        "accent": "#7ec6ff",
-        "label_text": "#04111c",
-        "highlight": "#ffffff",
-        "highlight_opacity": 0.85,
-        "tuning": {
-            "tail_base": -6,
-            "tail_range": 15,
-            "ear_tilt": -6,
-            "ear_range": 20,
-            "eye_y": 108,
-            "eye_range": -12,
-            "eye_open": 12,
-            "eye_open_range": -4,
-            "mouth_y": 190,
-            "mouth_curve": 178,
-            "mouth_range": -10,
-            "nose_height": 24,
-            "nose_range": -4,
-        },
-    },
-    "break": {
-        "label": "Break",
-        "bg": "#111b26",
-        "body": "#f6c08f",
-        "belly": "#fff5e6",
-        "ear": "#ffe0b9",
-        "mask": "#3b2619",
-        "cheek": "#ffc8bf",
-        "cheek_opacity": 0.7,
-        "tail": "#f6c08f",
-        "tail_tip": "#fff5e6",
-        "accent": "#ffd86b",
-        "label_text": "#1b1208",
-        "highlight": "#ffffff",
-        "highlight_opacity": 0.5,
-        "tuning": {
-            "tail_base": -20,
-            "tail_range": 32,
-            "ear_tilt": 6,
-            "ear_range": -8,
-            "eye_y": 112,
-            "eye_range": 4,
-            "eye_open": 16,
-            "eye_open_range": 2,
-            "mouth_y": 205,
-            "mouth_curve": 196,
-            "mouth_range": 12,
-            "nose_height": 28,
-            "nose_range": 4,
-        },
-    },
-    "alert": {
-        "label": "Alert",
-        "bg": "#1f0a0d",
-        "body": "#f09067",
-        "belly": "#ffdcd2",
-        "ear": "#ffbeaa",
-        "mask": "#351312",
-        "cheek": "#ff8b8b",
-        "cheek_opacity": 0.85,
-        "tail": "#f09067",
-        "tail_tip": "#ffdcd2",
-        "accent": "#ff6b6b",
-        "label_text": "#1f0a0d",
-        "highlight": "#fff5f5",
-        "highlight_opacity": 0.3,
-        "tuning": {
-            "tail_base": -30,
-            "tail_range": 45,
-            "ear_tilt": 10,
-            "ear_range": -30,
-            "eye_y": 106,
-            "eye_range": -16,
-            "eye_open": 10,
-            "eye_open_range": -6,
-            "mouth_y": 190,
-            "mouth_curve": 170,
-            "mouth_range": -18,
-            "nose_height": 22,
-            "nose_range": -6,
-        },
-    },
-}
-
-SVG_NS = "http://www.w3.org/2000/svg"
-ET.register_namespace("", SVG_NS)
-
-DOG_SVG_FALLBACK = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 320\" role=\"img\" aria-label=\"Reactive dog mascot\">
-  <rect id=\"frame\" width=\"320\" height=\"320\" rx=\"28\" fill=\"#0f1720\"/>
-  <g id=\"badge\">
-    <rect id=\"label-banner\" x=\"92\" y=\"18\" width=\"136\" height=\"36\" rx=\"18\" fill=\"#3fa9f5\" opacity=\"0.92\"/>
-    <text id=\"mode-label\" x=\"160\" y=\"43\" text-anchor=\"middle\" font-size=\"18\" font-family=\"'Nunito','Segoe UI',sans-serif\" fill=\"#04111c\">Idle</text>
-  </g>
-  <g id=\"dog\" transform=\"translate(36 52)\">
-    <g id=\"tail-group\" transform=\"rotate(-12 22 188)\">
-      <path id=\"tail\" d=\"M22 188 Q-60 140 6 108\" fill=\"none\" stroke=\"#f7b37f\" stroke-width=\"22\" stroke-linecap=\"round\"/>
-      <circle id=\"tail-tip\" cx=\"8\" cy=\"106\" r=\"18\" fill=\"#fff4e6\"/>
-    </g>
-    <path id=\"body\" d=\"M48 64 Q8 120 14 188 C20 248 70 280 124 280 C178 280 228 248 234 188 C240 120 200 64 160 64 L124 64 Z\" fill=\"#f7b37f\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linejoin=\"round\"/>
-    <path id=\"belly\" d=\"M80 186 C80 150 110 134 124 134 C138 134 168 150 168 186 C168 224 138 244 124 244 C110 244 80 224 80 186 Z\" fill=\"#fff4e6\" opacity=\"0.95\"/>
-    <g id=\"ear-left\" transform=\"rotate(0 76 46)\">
-      <path id=\"ear-left-shape\" d=\"M36 108 Q74 0 116 46 L102 120 Z\" fill=\"#ffd8b3\" stroke=\"#3d2b1f\" stroke-width=\"5\" stroke-linejoin=\"round\"/>
-    </g>
-    <g id=\"ear-right\" transform=\"rotate(0 172 46)\">
-      <path id=\"ear-right-shape\" d=\"M132 120 L118 46 Q160 0 204 108 Z\" fill=\"#ffd8b3\" stroke=\"#3d2b1f\" stroke-width=\"5\" stroke-linejoin=\"round\"/>
-    </g>
-    <path id=\"mask\" d=\"M28 142 C20 88 60 56 96 56 L152 56 C188 56 228 88 220 142 C214 182 180 214 124 214 C68 214 34 182 28 142 Z\" fill=\"#ffd8b3\"/>
-    <ellipse id=\"eye-left\" cx=\"88\" cy=\"110\" rx=\"20\" ry=\"14\" fill=\"#161616\"/>
-    <ellipse id=\"eye-right\" cx=\"160\" cy=\"110\" rx=\"20\" ry=\"14\" fill=\"#161616\"/>
-    <circle id=\"eye-highlight-left\" cx=\"76\" cy=\"102\" r=\"7\" fill=\"#ffffff\" opacity=\"0.6\"/>
-    <circle id=\"eye-highlight-right\" cx=\"148\" cy=\"102\" r=\"7\" fill=\"#ffffff\" opacity=\"0.6\"/>
-    <circle id=\"cheek-left\" cx=\"70\" cy=\"180\" r=\"20\" fill=\"#ffceb0\" opacity=\"0.50\"/>
-    <circle id=\"cheek-right\" cx=\"178\" cy=\"180\" r=\"20\" fill=\"#ffceb0\" opacity=\"0.50\"/>
-    <rect id=\"nose\" x=\"108\" y=\"140\" width=\"52\" height=\"26\" rx=\"14\" fill=\"#3d2b1f\"/>
-    <path id=\"nose-shine\" d=\"M114 154 Q134 164 150 154\" fill=\"none\" stroke=\"#000000\" stroke-width=\"3\" opacity=\"0.35\" stroke-linecap=\"round\"/>
-    <path id=\"mouth\" d=\"M74 200 Q124 188 174 200\" fill=\"none\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linecap=\"round\"/>
-    <path id=\"paw-left\" d=\"M64 238 C62 256 80 266 94 260\" fill=\"none\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linecap=\"round\" opacity=\"0.35\"/>
-    <path id=\"paw-right\" d=\"M182 260 C196 266 214 256 212 238\" fill=\"none\" stroke=\"#3d2b1f\" stroke-width=\"6\" stroke-linecap=\"round\" opacity=\"0.35\"/>
-  </g>
-</svg>
-"""
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "ok"}
 
 
-def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
-    return max(low, min(high, value))
+def _coerce_float(value: Any) -> Optional[float]:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(num):
+        return None
+    return num
 
 
-def render_dog_svg(mode: str, activity: float) -> str:
-    variant = DOG_VARIANTS.get(mode.lower(), DOG_VARIANTS["idle"])
-    tuning = variant["tuning"]
-    act = clamp(activity)
-    tail_angle = tuning["tail_base"] + tuning["tail_range"] * act
-    ear_left = tuning["ear_tilt"] + tuning["ear_range"] * act
-    ear_right = -tuning["ear_tilt"] - tuning["ear_range"] * 0.8 * act
-    eye_y = tuning["eye_y"] + tuning["eye_range"] * act
-    eye_ry = max(6.0, tuning["eye_open"] + tuning["eye_open_range"] * act)
-    mouth_y = tuning["mouth_y"]
-    mouth_q = tuning["mouth_curve"] + tuning["mouth_range"] * act
-    nose_height = max(18.0, tuning["nose_height"] + tuning["nose_range"] * act)
-    nose_y = eye_y + 30
-    tail_curve_x = -60 + 110 * act
-    tail_curve_y = 140 - 80 * act
-    eye_highlight = 4 + 3 * (1 - act)
-    eye_y_minus = eye_y - (eye_ry * 0.6)
-    nose_y_plus = nose_y + nose_height - 12
-    nose_y_plus2 = nose_y_plus + 10
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
 
-    root = ET.fromstring(DOG_SVG_FALLBACK)
 
-    def set_attrs(element_id: str, **attrs: str) -> Optional[ET.Element]:
-        element = root.find(f".//*[@id='{element_id}']")
-        if element is not None:
-            for key, value in attrs.items():
-                element.set(key, value)
-        return element
+def _tail_csv(path: Path, limit: int) -> deque[Dict[str, Any]]:
+    rows: deque[Dict[str, Any]] = deque(maxlen=limit)
+    if not path.exists():
+        return rows
+    try:
+        with path.open('r', encoding='utf-8', newline='') as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                rows.append(row)
+    except Exception:
+        return rows
+    return rows
 
-    set_attrs("frame", fill=variant["bg"])
-    set_attrs("label-banner", fill=variant["accent"])
-    label = set_attrs("mode-label", fill=variant["label_text"])
-    if label is not None:
-        label.text = variant["label"]
 
-    set_attrs("body", fill=variant["body"], stroke=variant["mask"])
-    set_attrs("belly", fill=variant["belly"])
-    set_attrs("mask", fill=variant["ear"])
-    set_attrs("ear-left-shape", fill=variant["ear"], stroke=variant["mask"])
-    set_attrs("ear-right-shape", fill=variant["ear"], stroke=variant["mask"])
-    set_attrs("tail", stroke=variant["tail"])
-    set_attrs("tail-tip", fill=variant["tail_tip"])
-    set_attrs("cheek-left", fill=variant["cheek"], opacity=f"{variant['cheek_opacity']:.2f}")
-    set_attrs("cheek-right", fill=variant["cheek"], opacity=f"{variant['cheek_opacity']:.2f}")
-    set_attrs("mouth", stroke=variant["mask"])
-    set_attrs("paw-left", stroke=variant["mask"])
-    set_attrs("paw-right", stroke=variant["mask"])
+def read_posture_summary(limit: int = 12) -> Dict[str, Any]:
+    rows = _tail_csv(POSTURE_CSV, limit)
+    total = 0
+    adjustments = 0
+    recent: List[Dict[str, Any]] = []
+    for row in rows:
+        ok = _coerce_bool(row.get('ok'))
+        total += 1
+        if not ok:
+            adjustments += 1
+        recent.append({
+            'timestamp': row.get('timestamp') or '',
+            'ok': ok,
+            'reason': row.get('reason') or '',
+            'tilt': _coerce_float(row.get('tilt_deg')),
+            'nod': _coerce_float(row.get('nod_deg')),
+            'session_adjustments': _coerce_int(row.get('session_adjustments')),
+            'tasks_completed_today': _coerce_int(row.get('tasks_completed_today')),
+        })
+    return {
+        'total_events': total,
+        'adjustments': adjustments,
+        'recent': recent[-limit:],
+        'source': str(POSTURE_CSV) if POSTURE_CSV.exists() else None,
+    }
 
-    set_attrs("tail-group", transform=f"rotate({tail_angle:.2f} 22 188)")
-    set_attrs("ear-left", transform=f"rotate({ear_left:.2f} 76 46)")
-    set_attrs("ear-right", transform=f"rotate({ear_right:.2f} 172 46)")
 
-    set_attrs("eye-left", cy=f"{eye_y:.2f}", ry=f"{eye_ry:.2f}")
-    set_attrs("eye-right", cy=f"{eye_y:.2f}", ry=f"{eye_ry:.2f}")
-    set_attrs(
-        "eye-highlight-left",
-        cy=f"{eye_y_minus:.2f}",
-        r=f"{eye_highlight:.2f}",
-        fill=variant["highlight"],
-        opacity=f"{variant['highlight_opacity']:.2f}",
-    )
-    set_attrs(
-        "eye-highlight-right",
-        cy=f"{eye_y_minus:.2f}",
-        r=f"{eye_highlight:.2f}",
-        fill=variant["highlight"],
-        opacity=f"{variant['highlight_opacity']:.2f}",
-    )
-
-    set_attrs("nose", y=f"{nose_y:.2f}", height=f"{nose_height:.2f}", fill=variant["mask"])
-    set_attrs(
-        "nose-shine",
-        d=f"M114 {nose_y_plus:.2f} Q134 {nose_y_plus2:.2f} 150 {nose_y_plus:.2f}",
-        stroke="#000000",
-    )
-    set_attrs(
-        "mouth",
-        d=f"M74 {mouth_y:.2f} Q124 {mouth_q:.2f} 174 {mouth_y:.2f}",
-    )
-    set_attrs(
-        "tail",
-        d=f"M22 188 Q{tail_curve_x:.2f} {tail_curve_y:.2f} 6 108",
-    )
-
-    svg_output = ET.tostring(root, encoding="unicode")
-    if not svg_output.startswith("<?xml"):
-        svg_output = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + svg_output
-    return svg_output
+def read_task_summary(limit: int = 12) -> Dict[str, Any]:
+    rows = _tail_csv(TASK_CSV, limit)
+    total = 0
+    completed = 0
+    created = 0
+    recent: List[Dict[str, Any]] = []
+    for row in rows:
+        action = (row.get('action') or '').strip().lower()
+        total += 1
+        if action == 'complete':
+            completed += 1
+        elif action == 'create':
+            created += 1
+        recent.append({
+            'timestamp': row.get('timestamp') or '',
+            'action': action or row.get('action') or '',
+            'section_title': row.get('section_title') or '',
+            'task_name': row.get('task_name') or row.get('name') or '',
+        })
+    return {
+        'total_events': total,
+        'completed': completed,
+        'created': created,
+        'recent': recent[-limit:],
+        'source': str(TASK_CSV) if TASK_CSV.exists() else None,
+    }
 
 
 PLACEHOLDER_JPEG = (
@@ -799,11 +999,19 @@ def ensure_web_assets() -> None:
     _write_asset(WEB_DIR / "index.html", INDEX_HTML)
     _write_asset(STATIC_DIR / "app.js", APP_JS)
     _write_asset(STATIC_DIR / "styles.css", STYLES_CSS)
-    _write_asset(STATIC_DIR / "dog.svg", DOG_SVG_FALLBACK)
 
 
 def build_status_payload() -> Dict[str, Any]:
     recent_motion = motion.snapshot()
+    if not recent_motion:
+        candidate: Optional[Path] = getattr(motion, "current_path", None)
+        if candidate is None:
+            for path in getattr(motion, "paths", []):
+                if path:
+                    candidate = path
+                    break
+        if candidate and not candidate.exists():
+            recent_motion = [f"Motion log não encontrado em {candidate}."]
     window = getattr(motion, "max_lines", 50) or 50
     activity = min(len(recent_motion) / max(1, float(window)), 1.0)
     return {
@@ -811,6 +1019,9 @@ def build_status_payload() -> Dict[str, Any]:
         "sense": sense.readings(),
         "motion": recent_motion,
         "activity_level": round(activity, 2),
+        "posture": read_posture_summary(),
+        "tasks": read_task_summary(),
+        "motion_source": str(motion.current_path) if getattr(motion, "current_path", None) else None,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -853,12 +1064,6 @@ async def camera_jpeg() -> StreamingResponse:
     frame = await run_in_threadpool(camera.read_jpeg)
     data = frame or PLACEHOLDER_JPEG
     return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
-
-
-@app.get("/dog.svg")
-async def dog_svg(mode: str = "idle", activity: float = 0.0) -> Response:
-    svg = await run_in_threadpool(render_dog_svg, mode, activity)
-    return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
 
 
 @app.websocket("/ws")

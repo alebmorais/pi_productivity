@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,36 +8,79 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🐾 pi_productivity</div>
+    <div class="brand">pi_productivity</div>
+    <div class="mode-pill" id="mode">Modo: ...</div>
     <div class="clock" id="clock"></div>
   </header>
 
   <main class="grid">
-    <section class="panel corgi-panel">
-      <img id="corgi" src="/dog.svg?mode=idle" alt="Dog mascot" />
-      <div class="mode" id="mode">Mode: ...</div>
+    <section class="panel mode-panel">
+      <h3>Presets de modo</h3>
+      <p class="preset-hint">Troque o modo manualmente quando não estiver usando o joystick.</p>
+      <div class="preset-list">
+        <button type="button" class="preset-btn" data-mode-btn data-mode="idle">Idle</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="focus">Focus</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="break">Break</button>
+        <button type="button" class="preset-btn" data-mode-btn data-mode="alert">Alert</button>
+      </div>
+      <div class="preset-status" id="presetStatus"></div>
     </section>
 
     <section class="panel measures">
-      <h3>Measures</h3>
+      <h3>Sense HAT</h3>
       <div class="measure"><span>Temp</span><b id="temp">--</b><span>°C</span></div>
-      <div class="measure"><span>Humidity</span><b id="hum">--</b><span>%</span></div>
-      <div class="measure"><span>Pressure</span><b id="pres">--</b><span>hPa</span></div>
+      <div class="measure"><span>Umid.</span><b id="hum">--</b><span>%</span></div>
+      <div class="measure"><span>Press.</span><b id="pres">--</b><span>hPa</span></div>
       <div class="availability" id="senseAvail"></div>
     </section>
 
+    <section class="panel posture">
+      <h3>Postura</h3>
+      <div class="stats-row">
+        <div class="stat">
+          <span>Eventos</span>
+          <b id="postureEvents">0</b>
+        </div>
+        <div class="stat">
+          <span>Ajustes</span>
+          <b id="postureAdjust">0</b>
+        </div>
+      </div>
+      <ul class="event-list" id="postureRecent"></ul>
+    </section>
+
     <section class="panel camera">
-      <h3>Camera</h3>
-      <img id="cam" src="/camera.jpg" alt="Camera" />
+      <h3>Última captura</h3>
+      <img id="cam" src="/camera.jpg" alt="Última captura da câmera" />
+    </section>
+
+    <section class="panel tasks">
+      <h3>Tarefas Motion</h3>
+      <div class="stats-row">
+        <div class="stat">
+          <span>Total</span>
+          <b id="tasksTotal">0</b>
+        </div>
+        <div class="stat">
+          <span>Concluídas</span>
+          <b id="tasksCompleted">0</b>
+        </div>
+        <div class="stat">
+          <span>Criadas</span>
+          <b id="tasksCreated">0</b>
+        </div>
+      </div>
+      <ul class="event-list" id="tasksRecent"></ul>
     </section>
 
     <section class="panel motion">
-      <h3>Motion tasks/events</h3>
+      <h3>Log do Motion</h3>
+      <div class="motion-source" id="motionSource"></div>
       <pre id="motion"></pre>
     </section>
   </main>
 
-  <footer class="foot">Made with FastAPI • Resize window to see compact mode</footer>
+  <footer class="foot">Feito com FastAPI • Atualiza automaticamente a cada poucos segundos</footer>
   <script src="/static/app.js"></script>
 </body>
 </html>
