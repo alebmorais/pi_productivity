@@ -56,12 +56,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Iterable
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.concurrency import run_in_threadpool
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+try:
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+    from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.middleware.cors import CORSMiddleware
+    from starlette.concurrency import run_in_threadpool
+except ImportError as e:
+    print("=" * 70)
+    print("ERRO: FastAPI não está instalado!")
+    print("=" * 70)
+    print("\nPara instalar as dependências necessárias, execute:")
+    print("  pip install fastapi 'uvicorn[standard]' jinja2")
+    print("\nOu instale todas as dependências do projeto:")
+    print("  pip install -r requirements.txt")
+    print("=" * 70)
+    raise ImportError(
+        "FastAPI não foi encontrado. Execute: pip install fastapi 'uvicorn[standard]' jinja2"
+    ) from e
+
+try:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+except ImportError as e:
+    raise ImportError(
+        "Jinja2 não foi encontrado. Execute: pip install jinja2"
+    ) from e
 
 # ---------------- Configuration ----------------
 WEB_DIR = Path(__file__).parent / "web"

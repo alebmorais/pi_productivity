@@ -14,8 +14,6 @@ const tasksCompletedEl = document.getElementById('tasksCompleted');
 const tasksCreatedEl = document.getElementById('tasksCreated');
 const tasksListEl = document.getElementById('tasksRecent');
 const motionEl = document.getElementById('motion');
-
-
 const VALID_MODES = ['idle', 'focus', 'break', 'alert'];
 
 function isPresent(value){
@@ -288,12 +286,12 @@ function updateTasks(data){
 
 function updateMotion(lines, source){
   const list = ensureArray(lines).map((item)=>String(item));
-  motionEl.textContent = list.length ? list.join('\n') : 'Nenhum evento recente do Motion.';
+  motionEl.textContent = list.length ? list.join('
+') : 'Nenhum evento recente do Motion.';
   if(motionSourceEl){
     motionSourceEl.textContent = source ? `Fonte: ${source}` : '';
   }
 }
-
 }
 
 function applyStatus(payload){
@@ -352,9 +350,11 @@ async function initWS(){
     console.error('WS init failed', e);
   }
 }
+
 updatePresetButtons('idle');
 setPresetStatus('');
 bindPresetButtons();
+
 tickClock();
 setInterval(tickClock, 500);
 refreshOnce();
