@@ -1,6 +1,6 @@
 # Pi Productivity – Guia rápido para Raspberry Pi
 
-Automatize postura, OCR de anotações e lembretes de hidratação usando Raspberry Pi 5, Sense HAT e câmera oficial. O projeto também pode integrar um display e-paper no futuro.
+Automatize postura, OCR de anotações e lembretes de hidratação usando Raspberry Pi 5, Sense HAT e câmera oficial. O projeto também integra um display e-paper opcional para mostrar tarefas sincronizadas em um banco SQLite local.
 
 ## Antes de começar
 - Raspberry Pi 5 (8 GB) com Raspberry Pi OS (Debian 12 Bookworm) atualizado.
@@ -142,14 +142,21 @@ api=os.getenv("MOTION_API_KEY")
 print(requests.get("https://api.usemotion.com/v1/tasks",
                    headers={"X-API-Key": api}, timeout=15).status_code)
 PY
-10. Próximos passos (opcional)
-Quando o display e-paper chegar, será possível:
+10. Display e-paper opcional
+Com o display Waveshare 1,53" conectado via SPI:
 
-Ver tarefas do dia com prazos no painel.
+```
+source ~/pi_productivity/.venv/bin/activate
+python epaper_display.py --limit 6
+```
 
-Usar o modo TAREFAS para atualizar o e-paper.
+O script lê tarefas do banco `~/pi_productivity/data/tasks.db`. O banco é atualizado automaticamente a cada alguns minutos (valor ajustável por `MOTION_SYNC_INTERVAL_SEC`) sempre que o app principal consegue acessar a Motion API. Caso queira rodar manualmente, você pode popular o banco via `TaskDatabase` ou inserir tarefas diretamente na tabela `tasks`.
 
-Usar o joystick (⬅️) como atalho para renovar o painel.
+Para personalizar:
+
+- `EPAPER_ENABLE=0` desativa as atualizações automáticas.
+- `EPAPER_ROTATE_180=1` gira a renderização quando o display estiver invertido.
+- `EPAPER_OUTPUT_PATH` muda o arquivo PNG gerado (padrão `/mnt/data/pi_productivity/last_epaper.png`).
 
 11. Comandos úteis do dia a dia
 bash
