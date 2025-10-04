@@ -29,6 +29,53 @@ class MotionClient:
         r.raise_for_status()
         return r.json()
 
+    def _extract_task_page(self, data):
+        """Return ``(tasks, next_cursor, cursor_param)`` from *data*."""
+
+        tasks_payload = data
+        if isinstance(data, dict) and "tasks" in data:
+            tasks_payload = data["tasks"]
+
+        tasks_list = []
+        if isinstance(tasks_payload, list):
+            tasks_list = tasks_payload
+        elif isinstance(tasks_payload, dict):
+            for key in ("items", "data", "results", "entries", "records"):
+                value = tasks_payload.get(key)
+                if isinstance(value, list):
+                    tasks_list = value
+                    break
+            else:
+                # Some endpoints return the list directly under an unexpected key.
+                flattened = [v for v in tasks_payload.values() if isinstance(v, list)]
+                if flattened:
+                    tasks_list = flattened[0]
+
+        next_cursor = None
+        cursor_param = None
+        cursor_sources = []
+        if isinstance(tasks_payload, dict):
+            cursor_sources.append(tasks_payload)
+        if isinstance(data, dict):
+            cursor_sources.append(data)
+        for source in cursor_sources:
+            for key, param in (
+                ("nextCursor", "cursor"),
+                ("cursor", "cursor"),
+                ("nextPageToken", "pageToken"),
+                ("pageToken", "pageToken"),
+                ("next", "cursor"),
+            ):
+                value = source.get(key) if isinstance(source, dict) else None
+                if value:
+                    next_cursor = value
+                    cursor_param = param
+                    break
+            if next_cursor:
+                break
+
+        return tasks_list, next_cursor, cursor_param
+
     def list_all_tasks_simple(self, limit=200):
         max_limit = 100  # Motion caps the page size at 100 items.
         tasks = []
@@ -49,7 +96,7 @@ class MotionClient:
                 params[cursor_param] = cursor
 
             data = self.get("/tasks", params=params)
-            page_tasks = data.get("tasks", data)
+            page_tasks, next_cursor, next_cursor_param = self._extract_task_page(data)
             if not isinstance(page_tasks, list):
                 page_tasks = []
             tasks.extend(page_tasks)
@@ -58,18 +105,6 @@ class MotionClient:
                 remaining = max(0, remaining - len(page_tasks))
                 if remaining == 0:
                     break
-
-            next_cursor = None
-            next_cursor_param = None
-            if "nextCursor" in data and data["nextCursor"]:
-                next_cursor = data["nextCursor"]
-                next_cursor_param = "cursor"
-            elif "nextPageToken" in data and data["nextPageToken"]:
-                next_cursor = data["nextPageToken"]
-                next_cursor_param = "pageToken"
-            elif "cursor" in data and data["cursor"]:
-                next_cursor = data["cursor"]
-                next_cursor_param = "cursor"
 
             if not next_cursor:
                 break
