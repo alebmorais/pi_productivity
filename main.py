@@ -16,6 +16,8 @@ from sense_mode import (
 from motion_client import MotionClient
 from camera_posture import PostureMonitor, PostureConfig
 from ocr_notes import OCRNotes, OCRConfig
+from task_database import TaskDatabase
+from epaper_display import EPaperDisplay
 
 # -------------------- Configs .env --------------------
 # Loops automáticos
@@ -28,6 +30,7 @@ OCR_INTERVAL = int(os.getenv("OCR_INTERVAL_SEC","30"))
 # Motion via OCR
 MOTION_ENABLE_OCR = os.getenv("MOTION_ENABLE_OCR","0") == "1"
 OCR_DEFAULT_DUE_DAYS = int(os.getenv("OCR_DEFAULT_DUE_DAYS","2"))
+MOTION_SYNC_INTERVAL = int(os.getenv("MOTION_SYNC_INTERVAL_SEC", "300"))
 
 # Hidratação
 HYDRATE_ENABLE = os.getenv("HYDRATE_ENABLE","1") == "1"
@@ -35,6 +38,11 @@ HYDRATE_INTERVAL_MIN = int(os.getenv("HYDRATE_INTERVAL_MIN","40"))
 HYDRATE_FLASHES = int(os.getenv("HYDRATE_FLASHES","6"))
 HYDRATE_ON_SEC = float(os.getenv("HYDRATE_ON_SEC","0.25"))
 HYDRATE_OFF_SEC = float(os.getenv("HYDRATE_OFF_SEC","0.15"))
+
+# Display e-paper / banco de dados de tarefas
+EPAPER_ENABLE = os.getenv("EPAPER_ENABLE", "1") == "1"
+EPAPER_ROTATE_180 = os.getenv("EPAPER_ROTATE_180", "0") == "1"
+EPAPER_DB_PATH = os.getenv("PI_PRODUCTIVITY_DB", "").strip() or None
 
 # Logs
 LOG_DIR = os.path.join(BASE_DIR, "logs")
@@ -97,6 +105,24 @@ class App:
         self.posture = PostureMonitor(PostureConfig())
         self.ocr = OCRNotes(OCRConfig())
         self._cam_lock = threading.Lock()
+
+        # Banco de tarefas e display e-paper
+        try:
+            self.task_db = TaskDatabase(EPAPER_DB_PATH)
+        except Exception as e:
+            self.task_db = None
+            print("[DB] tarefas desabilitado:", e)
+
+        self.epaper = None
+        if EPAPER_ENABLE:
+            try:
+                self.epaper = EPaperDisplay(rotate_180=EPAPER_ROTATE_180)
+            except Exception as e:
+                print("[EPaper] desabilitado:", e)
+        else:
+            print("[EPaper] desabilitado via configuração")
+
+        self._last_motion_sync = 0.0
         
         # Inicia loops automáticos
         if AUTO_POSTURE:
@@ -435,8 +461,31 @@ class App:
             self._active_timer = None
 
     def maybe_poll_motion(self):
-        # você já tinha; respeita regra “não mostrar long-term hoje”
-        pass
+        if not self.task_db:
+            return
+
+        now = time.time()
+        interval = max(60, MOTION_SYNC_INTERVAL)
+        if now - self._last_motion_sync < interval:
+            return
+
+        self._last_motion_sync = now
+        synced = 0
+        if self.motion:
+            try:
+                tasks = self.motion.list_all_tasks_simple()
+                synced = self.task_db.upsert_motion_tasks(tasks)
+                print(f"[Motion] sincronizou {synced} tarefas")
+            except Exception as e:
+                print("[Motion] erro ao sincronizar tarefas:", e)
+
+        if self.epaper:
+            try:
+                items = self.task_db.fetch_items_for_display()
+                path = self.epaper.render_list(items)
+                print(f"[EPaper] Atualizado: {path}")
+            except Exception as e:
+                print("[EPaper] erro ao atualizar display:", e)
 
     def run(self):
         self._render_mode_banner()
