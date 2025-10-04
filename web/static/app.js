@@ -250,8 +250,7 @@ function updateSense(senseData){
 function updateMotion(lines, source){
   if(motionEl){
     const list = ensureArray(lines).map((item)=>String(item));
-    motionEl.textContent = list.length ? list.join('
-') : 'Nenhum evento recente do Motion.';
+    motionEl.textContent = list.length ? list.join('\n') : 'Nenhum evento recente do Motion.';
   }
   if(motionSourceEl){
     motionSourceEl.textContent = source ? `Fonte: ${source}` : '';
