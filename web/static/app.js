@@ -14,6 +14,7 @@ const tasksCompletedEl = document.getElementById('tasksCompleted');
 const tasksCreatedEl = document.getElementById('tasksCreated');
 const tasksListEl = document.getElementById('tasksRecent');
 const motionEl = document.getElementById('motion');
+const motionSourceEl = document.getElementById('motionSource');
 const VALID_MODES = ['idle', 'focus', 'break', 'alert'];
 
 function isPresent(value){
@@ -202,7 +203,6 @@ function bindPresetButtons(){
           payload = {};
         }
         const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
-        setCorgi(next, 0);
         updatePresetButtons(next);
         const nextLabel = describeMode(next).label;
         setPresetStatus(`Modo definido para ${nextLabel}.`);
@@ -252,9 +252,19 @@ function renderList(element, items, fallbackText, decorate){
 }
 
 function updatePosture(data){
+  if(!postureEventsEl && !postureAdjustEl && !postureListEl){
+    return;
+  }
   const info = ensureObject(data);
-  postureEventsEl.textContent = formatInt(info.total_events);
-  postureAdjustEl.textContent = formatInt(info.adjustments);
+  if(postureEventsEl){
+    postureEventsEl.textContent = formatInt(info.total_events);
+  }
+  if(postureAdjustEl){
+    postureAdjustEl.textContent = formatInt(info.adjustments);
+  }
+  if(!postureListEl){
+    return;
+  }
   const items = ensureArray(info.recent);
   renderList(postureListEl, items, 'Nenhum evento recente.', (li, entry)=>{
     const ok = Boolean(entry && entry.ok);
@@ -285,13 +295,28 @@ function updateTasks(data){
 }
 
 function updateMotion(lines, source){
-  const list = ensureArray(lines).map((item)=>String(item));
-  motionEl.textContent = list.length ? list.join('
-') : 'Nenhum evento recente do Motion.';
+  if(motionEl){
+    const list = ensureArray(lines).map((item)=>String(item));
+    motionEl.textContent = list.length ? list.join('\n') : 'Nenhum evento recente do Motion.';
+  }
   if(motionSourceEl){
     motionSourceEl.textContent = source ? `Fonte: ${source}` : '';
   }
 }
+
+function refreshCamera(){
+  const cam = document.getElementById('cam');
+  if(!cam){
+    return;
+  }
+  const currentSrc = cam.getAttribute('src') || cam.dataset.src || '/cam.jpg';
+  try{
+    const url = new URL(currentSrc, window.location.href);
+    url.searchParams.set('_ts', Date.now().toString());
+    cam.src = url.pathname + (url.search ? url.search : '');
+  }catch(_err){
+    cam.src = `${currentSrc.split('?')[0]}?_ts=${Date.now()}`;
+  }
 }
 
 function applyStatus(payload){
