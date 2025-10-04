@@ -30,8 +30,57 @@ class MotionClient:
         return r.json()
 
     def list_all_tasks_simple(self, limit=200):
-        data = self.get("/tasks", params={"limit":limit})
-        return data.get("tasks", data)
+        max_limit = 100  # Motion caps the page size at 100 items.
+        tasks = []
+        remaining = None if limit is None else max(0, int(limit))
+        cursor = None
+        cursor_param = None
+
+        while True:
+            params = {}
+            if remaining is None:
+                params["limit"] = max_limit
+            elif remaining == 0:
+                break
+            else:
+                params["limit"] = min(remaining, max_limit)
+
+            if cursor and cursor_param:
+                params[cursor_param] = cursor
+
+            data = self.get("/tasks", params=params)
+            page_tasks = data.get("tasks", data)
+            if not isinstance(page_tasks, list):
+                page_tasks = []
+            tasks.extend(page_tasks)
+
+            if remaining is not None:
+                remaining = max(0, remaining - len(page_tasks))
+                if remaining == 0:
+                    break
+
+            next_cursor = None
+            next_cursor_param = None
+            if "nextCursor" in data and data["nextCursor"]:
+                next_cursor = data["nextCursor"]
+                next_cursor_param = "cursor"
+            elif "nextPageToken" in data and data["nextPageToken"]:
+                next_cursor = data["nextPageToken"]
+                next_cursor_param = "pageToken"
+            elif "cursor" in data and data["cursor"]:
+                next_cursor = data["cursor"]
+                next_cursor_param = "cursor"
+
+            if not next_cursor:
+                break
+
+            cursor = next_cursor
+            cursor_param = next_cursor_param
+
+        if remaining is not None and len(tasks) > limit:
+            tasks = tasks[:limit]
+
+        return tasks
 
     def find_task_by_name(self, needle):
         if not needle: return None
