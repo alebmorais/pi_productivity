@@ -15,14 +15,15 @@ const tasksCreatedEl = document.getElementById('tasksCreated');
 const tasksListEl = document.getElementById('tasksRecent');
 const motionEl = document.getElementById('motion');
 const motionSourceEl = document.getElementById('motionSource');
-const VALID_MODES = ['idle', 'focus', 'break', 'alert'];
+const MODE_LABELS = { idle: 'Idle', focus: 'Foco', break: 'Pausa', alert: 'Alerta' };
+const VALID_MODES = Object.keys(MODE_LABELS);
 
 function isPresent(value){
   return value !== undefined && value !== null;
 }
 
 function ensureObject(value){
-  return value !== undefined && value !== null && typeof value === 'object' ? value : {};
+  return isPresent(value) && typeof value === 'object' ? value : {};
 }
 
 function ensureArray(value){
@@ -48,10 +49,8 @@ function normalizeMode(value){
 
 function describeMode(value){
   const normalized = normalizeMode(value);
-  return {
-    normalized,
-
-  };
+  const label = MODE_LABELS[normalized] || normalized.toUpperCase();
+  return { normalized, label };
 }
 
 function formatNumber(value){
@@ -82,6 +81,9 @@ function formatTimestamp(value){
 }
 
 function tickClock(){
+  if(!clock){
+    return;
+  }
   const now = new Date();
   clock.textContent = now.toLocaleString();
 }
@@ -107,44 +109,6 @@ function updatePresetButtons(activeMode){
   }
 }
 
-function bindPresetButtons(){
-  if(!presetButtons.length){
-    return;
-  }
-  for(const btn of presetButtons){
-    btn.addEventListener('click', async ()=>{
-      const desiredInfo = describeMode(btn.dataset.mode);
-      setPresetStatus(`Atualizando para ${desiredInfo.label}...`);
-      btn.disabled = true;
-      try{
-        const response = await fetch('/api/mode', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({mode: desiredInfo.normalized})
-        });
-        if(!response.ok){
-          throw new Error(`HTTP ${response.status}`);
-        }
-        let payload = {};
-        try{
-          payload = await response.json();
-        }catch(_err){
-          payload = {};
-        }
-        const next = updateModeDisplay(payload.mode ?? desiredInfo.normalized);
-        updatePresetButtons(next);
-        const nextLabel = describeMode(next).label;
-        setPresetStatus(`Modo definido para ${nextLabel}.`);
-      }catch(err){
-        console.error('Failed to set mode', err);
-        setPresetStatus('Não foi possível atualizar o modo agora.', true);
-      }finally{
-        btn.disabled = false;
-      }
-    });
-  }
-}
-
 function updateModeDisplay(modeValue){
   const info = describeMode(modeValue);
   if(modeEl){
@@ -153,31 +117,6 @@ function updateModeDisplay(modeValue){
   return info.normalized;
 }
 
-function setPresetStatus(message = '', isError = false){
-  if(!presetStatus){
-    return;
-  }
-  presetStatus.textContent = message;
-  if(isError){
-    presetStatus.classList.add('error');
-  }else{
-    presetStatus.classList.remove('error');
-  }
-}
-
-function updatePresetButtons(activeMode){
-  if(!presetButtons.length){
-    return;
-  }
-  const normalized = normalizeMode(activeMode);
-  for(const btn of presetButtons){
-    const target = normalizeMode(btn.dataset.mode);
-    const isActive = target === normalized;
-    btn.classList.toggle('active', isActive);
-    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-  }
-}
-
 function bindPresetButtons(){
   if(!presetButtons.length){
     return;
@@ -213,21 +152,6 @@ function bindPresetButtons(){
         btn.disabled = false;
       }
     });
-  }
-}
-
-function updateSense(senseData){
-  const sense = ensureObject(senseData);
-  tempEl.textContent = formatNumber(sense.temperature);
-  humEl.textContent = formatNumber(sense.humidity);
-  presEl.textContent = formatNumber(sense.pressure);
-
-  if(sense.available){
-    senseAvail.textContent = 'Sense HAT disponível';
-  }else if(hasOwn(sense, 'error') && isPresent(sense.error)){
-    senseAvail.textContent = String(sense.error);
-  }else{
-    senseAvail.textContent = 'Sense HAT indisponível';
   }
 }
 
@@ -252,9 +176,6 @@ function renderList(element, items, fallbackText, decorate){
 }
 
 function updatePosture(data){
-  if(!postureEventsEl && !postureAdjustEl && !postureListEl){
-    return;
-  }
   const info = ensureObject(data);
   if(postureEventsEl){
     postureEventsEl.textContent = formatInt(info.total_events);
@@ -281,9 +202,18 @@ function updatePosture(data){
 
 function updateTasks(data){
   const info = ensureObject(data);
-  tasksTotalEl.textContent = formatInt(info.total_events);
-  tasksCompletedEl.textContent = formatInt(info.completed);
-  tasksCreatedEl.textContent = formatInt(info.created);
+  if(tasksTotalEl){
+    tasksTotalEl.textContent = formatInt(info.total_events);
+  }
+  if(tasksCompletedEl){
+    tasksCompletedEl.textContent = formatInt(info.completed);
+  }
+  if(tasksCreatedEl){
+    tasksCreatedEl.textContent = formatInt(info.created);
+  }
+  if(!tasksListEl){
+    return;
+  }
   const items = ensureArray(info.recent);
   renderList(tasksListEl, items, 'Nenhum evento recente.', (li, entry)=>{
     const ts = formatTimestamp(entry && entry.timestamp);
@@ -292,6 +222,29 @@ function updateTasks(data){
     const name = entry && entry.task_name ? ` — ${entry.task_name}` : '';
     li.textContent = `${ts} • ${action}${section}${name}`;
   });
+}
+
+function updateSense(senseData){
+  const sense = ensureObject(senseData);
+  if(tempEl){
+    tempEl.textContent = formatNumber(sense.temperature);
+  }
+  if(humEl){
+    humEl.textContent = formatNumber(sense.humidity);
+  }
+  if(presEl){
+    presEl.textContent = formatNumber(sense.pressure);
+  }
+  if(!senseAvail){
+    return;
+  }
+  if(sense.available){
+    senseAvail.textContent = 'Sense HAT disponível';
+  }else if(hasOwn(sense, 'error') && isPresent(sense.error)){
+    senseAvail.textContent = String(sense.error);
+  }else{
+    senseAvail.textContent = 'Sense HAT indisponível';
+  }
 }
 
 function updateMotion(lines, source){
@@ -309,7 +262,7 @@ function refreshCamera(){
   if(!cam){
     return;
   }
-  const currentSrc = cam.getAttribute('src') || cam.dataset.src || '/cam.jpg';
+  const currentSrc = cam.getAttribute('src') || cam.dataset.src || '/camera.jpg';
   try{
     const url = new URL(currentSrc, window.location.href);
     url.searchParams.set('_ts', Date.now().toString());
@@ -361,7 +314,7 @@ function handleEnvelope(message){
 
 async function initWS(){
   try{
-    const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws');
     ws.onmessage = (ev)=>{
       try{
         const message = JSON.parse(ev.data);
@@ -382,5 +335,6 @@ bindPresetButtons();
 
 tickClock();
 setInterval(tickClock, 500);
+
 refreshOnce();
 initWS();
