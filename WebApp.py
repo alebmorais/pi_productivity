@@ -107,18 +107,19 @@ WEB_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------- Sense HAT (optional) ----------------
+# Use the existing sense object from sense_mode
+try:
+    from sense_mode import sense
+    SENSE_AVAILABLE = True
+except ImportError:
+    sense = None
+    SENSE_AVAILABLE = False
+
 class SenseFacade:
     def __init__(self):
-        self.ok = False
-        self.err = None
-        try:
-            # Try sense-hat first; on Bookworm it may be 'sense_emu' or 'sense_hat'.
-            from sense_hat import SenseHat  # type: ignore
-            self.sense = SenseHat()
-            self.ok = True
-        except Exception as e:  # noqa: BLE001
-            self.sense = None
-            self.err = str(e)
+        self.ok = SENSE_AVAILABLE
+        self.err = None if SENSE_AVAILABLE else "Could not import 'sense' from 'sense_mode'"
+        self.sense = sense
 
     def readings(self) -> Dict[str, Any]:
         if self.ok and self.sense:
@@ -186,6 +187,44 @@ def set_mode(new_mode: str | Mode) -> None:
     except Exception:
         _current_mode = Mode.IDLE
 
+# ---------------- Motion Task Client ----------------
+try:
+    from motion_client import MotionClient
+    MOTION_AVAILABLE = True
+except (ImportError, RuntimeError) as e:
+    MotionClient = None
+    MOTION_AVAILABLE = False
+    MOTION_ERROR = str(e)
+
+class MotionTaskFetcher:
+    def __init__(self):
+        self.client = None
+        if MOTION_AVAILABLE and MotionClient:
+            try:
+                self.client = MotionClient()
+            except Exception as e:
+                self.client = None
+                global MOTION_AVAILABLE, MOTION_ERROR
+                MOTION_AVAILABLE = False
+                MOTION_ERROR = str(e)
+
+    def get_tasks(self) -> List[str]:
+        if not self.client:
+            return [f"Motion client not available: {MOTION_ERROR}"]
+        try:
+            tasks = self.client.list_all_tasks_simple()
+            if not tasks:
+                return ["No tasks found."]
+            
+            formatted_tasks = []
+            for task in tasks[:20]: # Limit for display
+                name = task.get("name", "Untitled Task")
+                status = "✓" if task.get("status", {}).get("isCompleted") else " "
+                formatted_tasks.append(f"[{status}] {name}")
+            return formatted_tasks
+        except Exception as e:
+            return [f"Error fetching Motion tasks: {e}"]
+
 # ---------------- Camera helpers ----------------
 class Camera:
     def __init__(self, index: int = 0):
@@ -230,12 +269,8 @@ class Camera:
 
 # ---------------- Motion log tail ----------------
 class MotionTailer:
-    def __init__(self, paths: Iterable[Path], max_lines: int = 50):
-        candidates = [Path(p) for p in paths if str(p)]
-        if not candidates:
-            candidates = [Path("/var/log/motion/motion.log")]
-        self.paths = candidates
-        self.current_path: Optional[Path] = None
+    def __init__(self, path: Path, max_lines: int = 50):
+        self.path = path
         self.max_lines = max_lines
         self.lines: List[str] = []
         self._stop = threading.Event()
@@ -250,39 +285,28 @@ class MotionTailer:
     def snapshot(self) -> List[str]:
         return list(self.lines[-self.max_lines :])
 
-    def _resolve_path(self) -> Optional[Path]:
-        for candidate in self.paths:
-            if candidate.exists():
-                return candidate
-        return self.paths[0] if self.paths else None
-
     def _run(self):
         try:
+            # On first run, read last max_lines from file if present
+            if self.path.exists():
+                with self.path.open("r", errors="ignore") as f:
+                    self.lines = f.readlines()[-self.max_lines :]
+            # Follow the file
             while not self._stop.is_set():
-                path = self._resolve_path()
-                if not path or not path.exists():
-                    self.current_path = path
+                if not self.path.exists():
                     time.sleep(1)
                     continue
-                self.current_path = path
-                try:
-                    with path.open("r", errors="ignore") as f:
-                        if not self.lines:
-                            self.lines = f.readlines()[-self.max_lines :]
-                        f.seek(0, os.SEEK_END)
-                        while not self._stop.is_set():
-                            pos = f.tell()
-                            line = f.readline()
-                            if not line:
-                                time.sleep(0.5)
-                                f.seek(pos)
-                                if path != self._resolve_path():
-                                    break
-                            else:
-                                self.lines.append(line.rstrip())
-                                self.lines = self.lines[-(self.max_lines * 2) :]
-                except Exception:
-                    time.sleep(1)
+                with self.path.open("r", errors="ignore") as f:
+                    f.seek(0, os.SEEK_END)
+                    while not self._stop.is_set():
+                        pos = f.tell()
+                        line = f.readline()
+                        if not line:
+                            time.sleep(0.5)
+                            f.seek(pos)
+                        else:
+                            self.lines.append(line.rstrip())
+                            self.lines = self.lines[-(self.max_lines * 2) :]
         except Exception:
             # Keep quiet; UI will just show nothing
             pass
@@ -315,7 +339,7 @@ class Broadcaster:
 
 sense = SenseFacade()
 camera = Camera(index=0)
-motion = MotionTailer(_motion_candidates, max_lines=100)
+motion = MotionTailer(MOTION_LOG, max_lines=100)
 bus = Broadcaster()
 
 # ---------------- FastAPI setup ----------------
@@ -1230,15 +1254,6 @@ def ensure_web_assets() -> None:
 
 def build_status_payload() -> Dict[str, Any]:
     recent_motion = motion.snapshot()
-    if not recent_motion:
-        candidate: Optional[Path] = getattr(motion, "current_path", None)
-        if candidate is None:
-            for path in getattr(motion, "paths", []):
-                if path:
-                    candidate = path
-                    break
-        if candidate and not candidate.exists():
-            recent_motion = [f"Motion log não encontrado em {candidate}."]
     window = getattr(motion, "max_lines", 50) or 50
     activity = min(len(recent_motion) / max(1, float(window)), 1.0)
     return {
@@ -1312,15 +1327,12 @@ _broadcast_task: Optional[asyncio.Task] = None
 async def on_startup() -> None:
     global _broadcast_task
     ensure_web_assets()
-    if not motion.thread.is_alive():
-        motion.start()
     _broadcast_task = asyncio.create_task(broadcast_loop())
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
     global _broadcast_task
-    motion.stop()
     if _broadcast_task:
         _broadcast_task.cancel()
         with suppress(asyncio.CancelledError):

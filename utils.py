@@ -1,24 +1,26 @@
-from datetime import datetime, timezone, date
-import pytz, os
+from datetime import datetime, date
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import os
 
 def get_tz():
-    tzname = os.getenv("TIMEZONE","UTC")
+    tzname = os.getenv("TIMEZONE", "UTC")
     try:
-        return pytz.timezone(tzname)
-    except Exception:
-        return pytz.UTC
+        return ZoneInfo(tzname)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
 
 def today_local():
-    tz = get_tz()
-    return datetime.now(tz).date()
+    return datetime.now(get_tz()).date()
 
 def parse_iso_date(dstr):
     # Accept 'YYYY-MM-DD' or ISO with Z/offset
-    if not dstr: return None
+    if not dstr:
+        return None
     try:
         if 'T' in dstr:
-            ds = dstr.replace('Z','+00:00')
-            return datetime.fromisoformat(ds).astimezone(get_tz()).date()
-        return datetime.fromisoformat(dstr).date()
-    except Exception:
+            # Handles ISO 8601 format like "2025-10-05T14:48:00.000Z"
+            return datetime.fromisoformat(dstr.replace('Z', '+00:00')).astimezone(get_tz()).date()
+        # Handles simple date format like "2025-10-05"
+        return date.fromisoformat(dstr)
+    except (ValueError, TypeError):
         return None

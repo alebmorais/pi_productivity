@@ -1,193 +1,292 @@
-# Pi Productivity – Guia rápido para Raspberry Pi
 
-Automatize postura, OCR de anotações e lembretes de hidratação usando Raspberry Pi 5, Sense HAT e câmera oficial. O projeto também integra um display e-paper opcional para mostrar tarefas sincronizadas em um banco SQLite local.
+---
 
-## Antes de começar
-- Raspberry Pi 5 (8 GB) com Raspberry Pi OS (Debian 12 Bookworm) atualizado.
-- Sense HAT encaixado na GPIO.
-- Câmera conectada ao conector CSI e habilitada nas configurações.
-- (Opcional) display e-paper Waveshare 1,53".
+## Câmera: Postura e OCR de Anotações
 
-## Passo a passo (sem precisar ser programador)
-
-### 1. Atualize o Raspberry Pi
+### Dependências de SO
 ```bash
 sudo apt update
+sudo apt install -y python3-picamera2 tesseract-ocr
+```
+
+### Dependências Python
+Instale via `pip install -r requirements.txt`:
+- opencv-python
+- pytesseract
+- pillow
+
+Pi Productivity (Raspberry Pi 5 + Sense HAT + Camera)
+
+Ferramentas de produtividade com Raspberry Pi 5 (8GB), Sense HAT, câmera (Picamera2) e (opcional) display e-paper.
+Funcionalidades principais:
+
+Modos com padrões de LED (trabalho, estudo, lazer, tarefas, postura, OCR).
+
+Monitoramento de postura contínuo, com log em CSV e feedback visual.
+
+OCR de anotações → cria/conclui tasks no Motion (com label e due date).
+
+Lembrete de hidratação (gota azul-clara no LED) em intervalo configurável.
+
+Análise: gera gráficos e correlação (postura × tarefas concluídas).
+
+1) Hardware & SO
+
+Raspberry Pi 5 (8GB)
+
+Sense HAT encaixado no GPIO
+
+Camera (conector CSI) habilitada
+
+(Opcional) e-paper 1,53" — a integração visual será configurada depois
+
+Sistema: Raspberry Pi OS (Debian 12 Bookworm)
+
+2) Pré-requisitos do sistema
+# Atualizar índices
+sudo apt update
+
+# Bibliotecas principais (camera, opencv, tesseract, sense hat)
 sudo apt install -y python3-picamera2 python3-opencv tesseract-ocr python3-sense-hat
-# Extras do OCR (opcional)
+
+# (opcional) idiomas extras do Tesseract
 # sudo apt install -y tesseract-ocr-por tesseract-ocr-eng tesseract-ocr-osd
-Use o OpenCV do sistema (python3-opencv). Evite instalar opencv-python via pip.
 
-2. Copie o projeto para ~/pi_productivity
-Escolha a alternativa que preferir:
 
-Via Git (mais fácil para atualizar depois)
+Importante: usamos python3-opencv do sistema para evitar conflitos com simplejpeg.
+Não instale opencv-python via pip.
 
-No GitHub do projeto, clique em Code → HTTPS e copie o link.
+3) Clonar / copiar o projeto
 
-No terminal do Raspberry:
+Coloque o projeto em ~/pi_productivity (home do usuário pi):
 
-bash
-Copy code
 cd ~
-git clone <cole_o_link_aqui> pi_productivity
-Sem Git (baixando ZIP)
+# se já tem a pasta copiada, pule este passo
+# git clone ...  (ou scp da sua máquina)
 
-No GitHub, clique em Code → Download ZIP.
+4) Ambiente Python
 
-No seu computador, descompacte o arquivo.
+Crie venv usando pacotes do sistema (para compartilhar OpenCV/numpy):
 
-Copie a pasta para o Raspberry (ex.: com FileZilla ou usando scp):
-
-bash
-Copy code
-scp -r /caminho/no_seu_pc/pi_productivity pi@IP_DO_PI:/home/pi/
-3. Crie o ambiente Python uma vez
-bash
-Copy code
 cd ~/pi_productivity
 python3 -m venv .venv --system-site-packages
 source .venv/bin/activate
 pip install -r requirements.txt
-Sempre que abrir um novo terminal/SSH, ative o ambiente com:
 
-bash
-Copy code
+
+Se abrir nova sessão SSH no futuro:
 source ~/pi_productivity/.venv/bin/activate
-4. Configure o arquivo .env
-bash
-Copy code
+
+5) Configuração (.env)
+
+Crie a partir do exemplo:
+
 cd ~/pi_productivity
 cp .env.example .env
 nano .env
-Preencha:
 
-MOTION_API_KEY: sua chave da Motion.
 
-MOTION_ENABLE_OCR, AUTO_POSTURE, AUTO_OCR: use 1 para ativar.
+Campos principais:
 
-Intervalos (POSTURE_INTERVAL_SEC, OCR_INTERVAL_SEC, HYDRATE_INTERVAL_MIN, etc.) podem ser ajustados se quiser.
+# Motion
+MOTION_API_KEY=coloque_sua_chave_aqui
+MOTION_ENABLE_OCR=1
+OCR_DEFAULT_DUE_DAYS=2
 
-5. Rode o aplicativo principal
-bash
-Copy code
+# Loops automáticos
+AUTO_POSTURE=1
+POSTURE_INTERVAL_SEC=120
+
+AUTO_OCR=1
+OCR_INTERVAL_SEC=30   
+
+# Hidratação (LED com gota azul-clara)
+HYDRATE_ENABLE=1
+HYDRATE_INTERVAL_MIN=40
+HYDRATE_FLASHES=6
+HYDRATE_ON_SEC=0.25
+HYDRATE_OFF_SEC=0.15
+
+
+Segurança: não commit o .env. Trate sua MOTION_API_KEY como segredo.
+
+6) Como rodar
 cd ~/pi_productivity
 source .venv/bin/activate
 python main.py
-Aparecem mensagens como:
 
-scss
-Copy code
+
+Você deve ver no terminal:
+
 [Auto] Postura ligada (cada 120s)
 [Auto] OCR ligado (cada 30s)
 [Auto] Hidratação ligada (cada 40 min)
-6. Entenda os controles do Sense HAT
-Cima / Baixo: troca de modo (trabalho, estudo, lazer, tarefas, postura, OCR).
 
-Direita: executa postura (modo POSTURA) ou OCR (modo OCR NOTAS) na hora.
+7) Controles (Sense HAT — joystick)
 
-Esquerda: reservado para atualizar o e-paper quando estiver instalado.
+Cima / Baixo: alterna entre os modos. Ao mudar, o LED mostra o padrão do modo.
 
-Sinais visuais:
+Direita:
 
-Postura OK pisca verde; ajuste necessário pisca vermelho.
+Em POSTURA → executa 1 ciclo de postura (pisca verde = ok, vermelho = ajustar).
 
-OCR concluído pisca ciano.
+Em OCR NOTAS → executa 1 ciclo de OCR (pisca ciano ao concluir).
 
-Lembrete de hidratação mostra uma gota azul-clara.
+Esquerda: reservado (ex.: abrir painel de tarefas no e-paper — implementar quando o display chegar).
 
-7. Onde ficam os arquivos
-Imagens e textos do OCR: ~/pi_productivity/notes/.
+Mesmo sem acionar manualmente, os loops automáticos chamam periodicamente:
 
-Logs de postura diários: ~/pi_productivity/logs/posture_YYYYMMDD.txt.
+Postura a cada POSTURE_INTERVAL_SEC
 
-CSVs cumulativos:
+OCR a cada OCR_INTERVAL_SEC
 
-Postura: ~/pi_productivity/logs/posture_events.csv.
+8) Modos & padrões de LED
 
-OCR/Tarefas: ~/pi_productivity/logs/task_events.csv.
+TAREFAS: tabuleiro branco/preto (mostra painel quando o e-paper estiver pronto).
 
-8. Relatórios opcionais
-Gere gráficos e correlações:
+TRABALHO: HAPVIDA: metade esquerda verde.
 
-bash
-Copy code
+TRABALHO: CARE PLUS: “X” azul.
+
+ESTUDO (TDAH): moldura amarela (técnica sugerida no display ao entrar no modo).
+
+LAZER: roxo sólido.
+
+POSTURA: cruz vermelha (monitoramento).
+
+OCR NOTAS: moldura e diagonal ciano (leitura/automação).
+
+Eventos:
+
+Postura OK → pisca verde; Ajustar → vermelho.
+
+OCR concluído → ciano.
+
+Hidratação (a cada HYDRATE_INTERVAL_MIN) → gota azul-clara piscando; volta ao padrão do modo depois.
+
+9) OCR → regras e integração com Motion
+
+Formato sugerido nas anotações:
+
+Revisão Bibliográfica
+- [ ] Ler artigo X
+- [x] Enviar e-mail Y
+DUE: 2025-10-05
+
+
+Regras:
+
+Título da seção (“Revisão Bibliográfica”) → vira label da task.
+
+- [ ] ou TODO: → cria tarefa (label = título).
+
+- [x] ou DONE: → conclui tarefa; se não existir, cria e conclui.
+
+DUE: YYYY-MM-DD → define prazo; se ausente, usa OCR_DEFAULT_DUE_DAYS (padrão 2 dias).
+
+Arquivos gerados pelo OCR:
+
+Imagem preprocessada: ~/pi_productivity/notes/note_YYYYmmdd_HHMMSS.png
+
+Texto extraído: ~/pi_productivity/notes/note_YYYYmmdd_HHMMSS.txt
+
+10) Logs e análise
+
+Logs:
+
+Postura (texto diário): ~/pi_productivity/logs/posture_YYYYMMDD.txt
+
+Postura (CSV cumulativo): ~/pi_productivity/logs/posture_events.csv
+Campos: timestamp, ok, reason, tilt_deg, nod_deg, session_adjustments, tasks_completed_today
+
+OCR/Tasks (CSV): ~/pi_productivity/logs/task_events.csv
+Campos: timestamp, action, section_title, task_name
+
+Análise (opcional):
+
+Script: analyze_productivity.py
+
+Saídas em ~/pi_productivity/analytics/:
+
+summary_daily.csv
+
+posture_per_day.png
+
+tasks_completed_per_day.png
+
+posture_vs_tasks_scatter.png
+
+report.txt (correlação)
+
+Como rodar:
+
 cd ~/pi_productivity
 source .venv/bin/activate
 python analyze_productivity.py
-Os resultados ficam em ~/pi_productivity/analytics/.
 
-9. Ajuda rápida
-Reinstalar pacotes principais (caso algo falhe):
+11) Dicas & solução de problemas
 
-bash
-Copy code
+Camera/NumPy/simplejpeg: use pacotes do sistema:
 sudo apt install -y python3-picamera2 python3-opencv python3-numpy python3-simplejpeg
-Conferir o arquivo da câmera do OpenCV: /usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml.
 
-Sem interface gráfica? Copie arquivos com:
+OpenCV cv2.data ausente: já tratamos com paths fixos:
+/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml
 
-bash
-Copy code
-scp pi@IP_DO_PI:/home/pi/pi_productivity/last_posture.jpg .
-Motion retornou erro 401/400? Revise MOTION_API_KEY no .env. Teste rápido:
+Sem GUI (SSH): xdg-open pode não funcionar via SSH. Para ver arquivos:
 
-bash
-Copy code
+Copie para seu computador:
+scp pi@<ip_do_pi>:/home/pi/pi_productivity/last_posture.jpg .
+
+Motion 401/400: verifique MOTION_API_KEY no .env.
+Teste rápido:
+
 python - <<'PY'
 import os, requests
 from dotenv import load_dotenv
 load_dotenv("/home/pi/pi_productivity/.env")
 api=os.getenv("MOTION_API_KEY")
-print(requests.get("https://api.usemotion.com/v1/tasks",
-                   headers={"X-API-Key": api}, timeout=15).status_code)
+print(requests.get("https://api.usemotion.com/v1/tasks", headers={"X-API-Key":api}, timeout=15).status_code)
 PY
-10. Display e-paper opcional
-Com o display Waveshare 1,53" conectado via SPI:
 
-```
-source ~/pi_productivity/.venv/bin/activate
-python epaper_display.py --limit 6
-```
 
-O script lê tarefas do banco `~/pi_productivity/data/tasks.db`. O banco é atualizado automaticamente a cada alguns minutos (valor ajustável por `MOTION_SYNC_INTERVAL_SEC`) sempre que o app principal consegue acessar a Motion API. Caso queira rodar manualmente, você pode popular o banco via `TaskDatabase` ou inserir tarefas diretamente na tabela `tasks`.
+Esperado: 200.
 
-Para personalizar:
+Permissão em /mnt/data: não usamos esse caminho; tudo salva em ~/pi_productivity/....
 
-- `EPAPER_ENABLE=0` desativa as atualizações automáticas.
-- `EPAPER_ROTATE_180=1` gira a renderização quando o display estiver invertido.
-- `EPAPER_OUTPUT_PATH` muda o arquivo PNG gerado (padrão `/mnt/data/pi_productivity/last_epaper.png`).
+12) Próximos passos (e-paper)
 
-11. Comandos úteis do dia a dia
-bash
-Copy code
-# Ativar o ambiente virtual
+Quando o e-paper estiver conectado, ativaremos:
+
+render das tarefas do dia (Motion) com prazos
+
+modo TAREFAS atualiza o e-paper automaticamente
+
+atalhos no joystick (⬅️) para “atualizar painel”
+
+13) Comandos úteis
+# Ativar venv
 source ~/pi_productivity/.venv/bin/activate
 
-# Rodar o app principal
+# Rodar app
 python ~/pi_productivity/main.py
 
-# Rodar a análise
+# Rodar análise
 python ~/pi_productivity/analyze_productivity.py
 
-# Editar configurações
+# Editar configs
 nano ~/pi_productivity/.env
-12. Interface Web (opcional)
-Para iniciar o painel FastAPI:
 
-bash
-Copy code
-pip install fastapi "uvicorn[standard]" jinja2 watchdog opencv-python numpy
-cd ~/pi_productivity
-source .venv/bin/activate
-python WebApp
-# ou
-uvicorn WebApp:app --host 0.0.0.0 --port 8090
-ruby
-Copy code
+# How to run the Pi loops (main.py)
+main.py drives the Sense HAT, posture/OCR camera loops, and hydration reminders. After activating the project’s virtualenv you can launch it in a single command:
+cd ~/pi_productivity && source .venv/bin/activate && python main.py
 
-Esta versão reorganiza as mesmas funcionalidades, comandos e caminhos já documentados no README atual do projeto.​:codex-file-citation[codex-file-citation]{line_range_start=18 line_range_end=291 path=README.md git_url="https://github.com/alebmorais/pi_productivity/blob/main/README.md#L18-L291"}​
+# How to run the FastAPI web UI
+The companion FastAPI server lives in the WebApp entrypoint. Make sure the extra dependencies are installed:
+python -m pip install fastapi uvicorn[standard] jinja2 watchdog opencv-python numpy
 
-Testing:
-⚠️ Não executado (análise apenas de documentação).
+# Then start the web UI (defaults to 0.0.0.0:8090, override with WEBAPP_HOST/WEBAPP_PORT if needed) in one line:
+cd ~/pi_productivity && source .venv/bin/activate && python WebApp
+An alternative foreground launch that makes the host/port explicit is:
+cd ~/pi_productivity && source .venv/bin/activate && uvicorn WebApp:app --host 0.0.0.0 --port 8090
 
+# WebApp also exposes start_in_background() if you later decide to import it from main.py and keep both processes in the same interpreter.

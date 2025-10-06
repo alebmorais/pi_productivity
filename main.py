@@ -273,23 +273,20 @@ class App:
         try:
             with self._cam_lock:
                 frame = self.cam.capture_array()
-                status = self.posture.analyze_frame(frame)
+            status = self.posture.analyze_frame(frame)
                 if not status.get("ok"):
                     self.posture_adjust_count += 1
+            self._log_posture_csv(status)
+            if frame is not None:
                 try:
                     import cv2
                     cv2.imwrite(os.path.join(BASE_DIR, "last_posture.jpg"), frame)
-                except Exception:
-                    pass
-                self._log_posture_csv(status)
+                except Exception as e:
+                    print("[Posture] erro ao salvar imagem:", e)
         except Exception as e:
             print("[PostureLog] aviso:", e)
+        
         self._flash(GREEN if status.get("ok") else RED, times=3)
-        try:
-            import cv2
-            cv2.imwrite(os.path.join(BASE_DIR, "last_posture.jpg"), frame)
-        except Exception:
-            pass
         self._show_mode_pattern(self.MODES[self.mode_index])
         return status
 

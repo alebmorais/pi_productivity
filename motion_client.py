@@ -12,7 +12,11 @@ class MotionClient:
         if not api:
             raise RuntimeError("Defina MOTION_API_KEY no arquivo .env")
         self.sess = requests.Session()
-        self.sess.headers.update({"X-API-Key": api})
+        self.sess.headers.update({
+            "Authorization": f"Bearer {api}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        })
 
     def get(self, path, params=None):
         r = self.sess.get(f"{BASE}{path}", params=params or {}, timeout=15)

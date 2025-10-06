@@ -61,8 +61,8 @@ class EPaperDisplay:
             subtitle = str(item.get("subtitle", ""))
             draw.text((6, y), left[:22], font=self.font_small, fill=0)
             if right:
-                width = draw.textlength(right, font=self.font_small)
-                draw.text((EPD_W - 6 - width, y), right[:10], font=self.font_small, fill=0)
+                w = d.textlength(right, font=self.font_small)
+                d.text((EPD_W-6-w, y), right, font=self.font_small, fill=0)
             y += 14
             if subtitle:
                 draw.text((10, y), f"• {subtitle[:24]}", font=self.font_small, fill=0)
