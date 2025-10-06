@@ -428,7 +428,6 @@ class App:
     def handle_joystick(self, event):
         if event.action not in ("pressed", "held"):
             return
-
         delta = 0
         if event.direction in ("right", "up"):
             delta = 1

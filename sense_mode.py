@@ -1,9 +1,16 @@
 
 import time, threading, math
-from sense_hat import SenseHat
+try:
+    from sense_hat import SenseHat
+except ImportError:
+    print("Error: The 'sense_hat' library is not installed. Please install it with 'pip install sense-hat'.")
+    SenseHat = None
 
-sense = SenseHat()
-sense.low_light = True
+if SenseHat:
+    sense = SenseHat()
+    sense.low_light = True
+else:
+    sense = None
 
 BLACK = [0,0,0]
 WHITE = [255,255,255]
