@@ -66,7 +66,7 @@ class MotionClient:
                 ("pageToken", "pageToken"),
                 ("next", "cursor"),
             ):
-                value = source.get(key) if isinstance(source, dict) else None
+                value = source.get(key)
                 if value:
                     next_cursor = value
                     cursor_param = param
