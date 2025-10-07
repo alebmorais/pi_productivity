@@ -10,6 +10,5 @@ requests
 sense-hat
 uvicorn[standard]
 watchdog
-waveshare-epd
 spidev
 RPi.GPIO

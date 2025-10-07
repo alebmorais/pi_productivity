@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Attempt to import the real EPD library
 try:
-    from waveshare_epd import epd2in7
+    from waveshare_epd import epd1in54_V2
     EPD_AVAILABLE = True
 except (ImportError, RuntimeError):
     EPD_AVAILABLE = False
@@ -17,13 +17,13 @@ class EPD:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         if EPD_AVAILABLE:
-            self.epd = epd2in7.EPD()
-            self.width = self.epd.height
-            self.height = self.epd.width
+            self.epd = epd1in54_V2.EPD()
+            self.width = self.epd.width
+            self.height = self.epd.height
         else:
             self.epd = None
-            self.width = 264
-            self.height = 176
+            self.width = 200
+            self.height = 200
             print("Warning: E-Paper display not found. Mock images will be generated.")
 
     def _init_display(self):
