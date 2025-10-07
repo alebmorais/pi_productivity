@@ -32,9 +32,13 @@ sudo apt-get upgrade -y
 sudo apt-get install -y \
     libcamera-dev \
     python3-opencv \
+    python3-spidev \
+    python3-rpi.gpio \
     tesseract-ocr \
     libatlas-base-dev
 ```
+
+**Note:** We install `opencv`, `spidev`, and `rpi.gpio` using `apt-get` because these packages require deep integration with the Raspberry Pi hardware. Using the system-provided versions is more stable than installing them with `pip`.
 
 ### 2. Enable Hardware Interfaces
 

@@ -2,7 +2,6 @@ fastapi
 jinja2
 matplotlib
 numpy
-opencv-python
 picamera2
 Pillow
 python-dotenv
@@ -12,3 +11,5 @@ sense-hat
 uvicorn[standard]
 watchdog
 waveshare-epd
+spidev
+RPi.GPIO
