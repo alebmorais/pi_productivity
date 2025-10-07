@@ -16,7 +16,7 @@ This project turns a Raspberry Pi into a personal productivity and focus-assista
 - Raspberry Pi (3B+ or newer recommended)
 - Raspberry Pi Camera Module
 - Sense HAT
-- Waveshare 2.7inch e-Paper HAT
+- Waveshare 1.54inch e-Paper Module V2
 
 ## Setup and Installation
 
@@ -113,7 +113,25 @@ source .venv/bin/activate
 
 *To exit the virtual environment later, just type `deactivate`.*
 
-Now, install the required Python packages:
+Now, install the required Python packages. First, install the e-paper library manually, as it's not available on PyPI in a stable way.
+
+```bash
+# Clone the official Waveshare library
+cd ~
+git clone https://github.com/waveshare/e-Paper.git
+
+# Find your virtual environment's site-packages directory
+SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
+
+# Copy the library into your environment
+cp -r ~/e-Paper/python/lib/waveshare_epd "$SITE_PACKAGES/"
+
+# Clean up and return to the project directory
+rm -rf ~/e-Paper
+cd ~/pi_productivity
+```
+
+Next, install the rest of the dependencies from `requirements.txt`:
 
 ```bash
 pip install -r requirements.txt
