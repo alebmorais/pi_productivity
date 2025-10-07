@@ -12,3 +12,5 @@ uvicorn[standard]
 watchdog
 spidev
 RPi.GPIO
+opencv-python
+python-multipart

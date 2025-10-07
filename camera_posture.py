@@ -9,24 +9,29 @@ class PostureConfig:
 class PostureMonitor:
     def __init__(self, cfg: PostureConfig):
         self.cfg = cfg
-        # Caminhos Debian/RPi para cascatas
+        # Caminhos para cascatas, incluindo o caminho do pacote cv2
+        face_cascade_filename = "haarcascade_frontalface_default.xml"
+        eye_cascade_filename = "haarcascade_eye.xml"
+        
         candidates = [
-            "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
-            "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml",
+            os.path.join(cv2.data.haarcascades, face_cascade_filename),
+            f"/usr/share/opencv4/haarcascades/{face_cascade_filename}",
+            f"/usr/share/opencv/haarcascades/{face_cascade_filename}",
         ]
         cascade_path = next((p for p in candidates if os.path.exists(p)), None)
         if not cascade_path:
-            raise FileNotFoundError("Não encontrei haarcascade_frontalface_default.xml")
+            raise FileNotFoundError(f"Não encontrei {face_cascade_filename}")
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
 
         # Cascade para olhos
         eye_cascade_candidates = [
-            "/usr/share/opencv4/haarcascades/haarcascade_eye.xml",
-            "/usr/share/opencv/haarcascades/haarcascade_eye.xml",
+            os.path.join(cv2.data.haarcascades, eye_cascade_filename),
+            f"/usr/share/opencv4/haarcascades/{eye_cascade_filename}",
+            f"/usr/share/opencv/haarcascades/{eye_cascade_filename}",
         ]
         eye_cascade_path = next((p for p in eye_cascade_candidates if os.path.exists(p)), None)
         if not eye_cascade_path:
-            raise FileNotFoundError("Não encontrei haarcascade_eye.xml")
+            raise FileNotFoundError(f"Não encontrei {eye_cascade_filename}")
         self.eye_cascade = cv2.CascadeClassifier(eye_cascade_path)
 
     def _get_eye_angle(self, face_roi_gray):

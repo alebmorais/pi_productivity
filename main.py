@@ -23,7 +23,7 @@ from task_database import TaskDatabase
 from motion_client import MotionClient
 from ocr_notes import OCRNotes, OCRConfig
 from epaper import EPD
-from camera_posture import PostureAnalyzer
+from camera_posture import PostureMonitor, PostureConfig
 
 # --- Configuration Loading ---
 BASE_DIR = Path(os.getenv("PI_PRODUCTIVITY_DIR", "~/pi_productivity")).expanduser()
@@ -62,7 +62,7 @@ class PiProductivity:
         self.motion_client = MotionClient()
         self.ocr_notes = OCRNotes(OCRConfig())
         self.epaper_display = EPD()
-        self.posture = PostureAnalyzer()
+        self.posture = PostureMonitor(PostureConfig())
         self.camera = self._init_camera()
         self._cam_lock = threading.Lock()
 
