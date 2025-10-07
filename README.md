@@ -106,10 +106,10 @@ cd ~/pi_productivity
 
 ### 4. Set Up Python Environment
 
-It is highly recommended to use a Python virtual environment to manage dependencies.
+It is highly recommended to use a Python virtual environment to manage dependencies. On Raspberry Pi, it's best to create it with access to system-level packages, as some libraries (like OpenCV and RPi.GPIO) are more stable when installed via `apt`.
 
 ```bash
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 ```
 
