@@ -169,6 +169,7 @@ Hidratação (a cada HYDRATE_INTERVAL_MIN) → gota azul-clara piscando; volta a
 Formato sugerido nas anotações:
 
 Revisão Bibliográfica
+
 - [ ] Ler artigo X
 - [x] Enviar e-mail Y
 DUE: 2025-10-05
