@@ -34,6 +34,7 @@ sudo apt-get update
 sudo apt-get upgrade -y
 sudo apt-get install -y \
     libcamera-dev \
+    libcap-dev \
     python3-opencv \
     python3-spidev \
     python3-rpi.gpio \
@@ -53,6 +54,7 @@ sudo apt-get update
 sudo apt-get upgrade -y
 sudo apt-get install -y \
     libcamera-tools \
+    libcap-dev \
     python3-opencv \
     python3-spidev \
     python3-rpi.gpio \
