@@ -26,6 +26,9 @@ These instructions are for a Raspberry Pi running the latest **Raspberry Pi OS (
 
 First, make sure your system is up-to-date and install the necessary libraries for computer vision, text recognition, and hardware interfacing.
 
+<details>
+<summary><b>Instructions for Raspberry Pi OS (64-bit)</b></summary>
+
 ```bash
 sudo apt-get update
 sudo apt-get upgrade -y
@@ -38,22 +41,57 @@ sudo apt-get install -y \
     libatlas-base-dev
 ```
 
+</details>
+
+<details>
+<summary><b>Instructions for Ubuntu 24.04 / Debian-based Systems</b></summary>
+
+On Ubuntu and other modern Debian-based systems, some package names are different. `libatlas-base-dev` is often replaced by other libraries, and camera tools are in a different package.
+
+```bash
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo apt-get install -y \
+    libcamera-tools \
+    python3-opencv \
+    python3-spidev \
+    python3-rpi.gpio \
+    tesseract-ocr \
+    libblas-dev \
+    liblapack-dev
+```
+
+</details>
+
 **Note:** We install `opencv`, `spidev`, and `rpi.gpio` using `apt-get` because these packages require deep integration with the Raspberry Pi hardware. Using the system-provided versions is more stable than installing them with `pip`.
 
 ### 2. Enable Hardware Interfaces
 
 Use the Raspberry Pi Configuration tool to enable the camera and I2C interfaces.
 
+**On Raspberry Pi OS:**
 ```bash
 sudo raspi-config
 ```
 
 Navigate to **3 Interface Options** and enable:
-
-- **I1 Legacy Camera** (Enable legacy camera support for Picamera2)
 - **I2C** (For the Sense HAT and e-paper display)
 
-Reboot your Raspberry Pi when prompted.
+The legacy camera option is no longer needed for modern versions of Raspberry Pi OS with `Picamera2`. The system will use the `libcamera` stack by default. Reboot your Raspberry Pi if prompted.
+
+**On Ubuntu / Other Systems:**
+
+The `raspi-config` tool is not available. Camera and I2C are typically managed via system configuration files. For the camera, you can test it directly if `libcamera-tools` is installed.
+
+To test your camera, first list available devices:
+```bash
+cam --list
+```
+
+Then, capture a test image (replace `-c 0` if your camera has a different ID):
+```bash
+cam -c 0 --capture=1 --file=test.jpg
+```
 
 ### 3. Clone the Project
 
