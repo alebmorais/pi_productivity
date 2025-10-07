@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pi_productivity</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">pi_productivity</div>
+    <div class="mode-pill" id="mode-display">Mode: ...</div>
+    <div class="clock" id="clock"></div>
+  </header>
+
+  <main class="grid">
+    <section class="panel camera">
+      <h3>Live Camera</h3>
+      <img id="cam" src="/camera.jpg" alt="Live camera feed" />
+      <button id="ocr-button" class="preset-btn">Capture Note (OCR)</button>
+    </section>
+
+    <section class="panel measures">
+      <h3>Sense HAT</h3>
+      <div class="measure"><span>Temp</span><b id="temp">--</b><span>°C</span></div>
+      <div class="measure"><span>Humidity</span><b id="hum">--</b><span>%</span></div>
+      <div class="measure"><span>Pressure</span><b id="pres">--</b><span>hPa</span></div>
+      <div class="availability" id="senseAvail"></div>
+    </section>
+
+    <section class="panel mode-panel">
+      <h3>Sense HAT Mode</h3>
+      <p class="preset-hint">Select a mode to run on the Sense HAT display.</p>
+      <form id="sense-form" class="preset-list">
+          <select name="mode_name" id="mode-select">
+              <option value="none" {% if active_mode == 'none' %}selected{% endif %}>None (Off)</option>
+              {% for mode in sense_modes %}
+              <option value="{{ mode }}" {% if active_mode == mode %}selected{% endif %}>{{ mode.replace('_', ' ')|title }}</option>
+              {% endfor %}
+          </select>
+          <button type="submit" class="preset-btn">Set Mode</button>
+      </form>
+      <div class="preset-status" id="presetStatus"></div>
+    </section>
+
+    <section class="panel tasks">
+      <h3>Tasks</h3>
+      <div id="task-container">
+        <!-- Tasks will be rendered here by app.js -->
+      </div>
+      <form action="/add_task" method="post" class="add-task-form">
+        <input type="text" name="task_name" required placeholder="Add a new task...">
+        <button type="submit">Add</button>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">Powered by FastAPI. Auto-updates via WebSockets.</footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+</body>
+</html>

@@ -24,3 +24,32 @@ def parse_iso_date(dstr):
         return date.fromisoformat(dstr)
     except (ValueError, TypeError):
         return None
+
+def normalize_and_format_date(value: object | None) -> str | None:
+    """Normalizes a date from various formats into an ISO string."""
+    if value is None:
+        return None
+    
+    dt = None
+    if isinstance(value, (int, float)):
+        try:
+            dt = datetime.fromtimestamp(float(value))
+        except (ValueError, OSError):
+            return None
+    elif isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            # Handles full ISO 8601 format
+            dt = datetime.fromisoformat(candidate.replace('Z', '+00:00'))
+        except ValueError:
+            try:
+                # Handles simple 'YYYY-MM-DD'
+                dt = datetime.strptime(candidate, '%Y-%m-%d')
+            except ValueError:
+                return None
+    
+    if dt:
+        return dt.isoformat(timespec="seconds")
+    return None

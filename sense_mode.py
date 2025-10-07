@@ -1,15 +1,32 @@
 import time, threading, math
+
+class MockSenseHat:
+    """A mock class for SenseHat for development on non-Raspberry Pi machines."""
+    def __init__(self):
+        self.low_light = False
+        self.pixels = [[0,0,0]] * 64
+
+    def get_accelerometer_raw(self):
+        return {'x': 0.0, 'y': 0.0, 'z': 1.0}
+
+    def set_pixels(self, pixels):
+        self.pixels = pixels
+        print("[MockSenseHat] Set pixels.")
+
+    def clear(self, color=None):
+        color = color or [0,0,0]
+        print(f"[MockSenseHat] Cleared display with color {color}.")
+
+    def show_letter(self, letter):
+        print(f"[MockSenseHat] Displayed letter '{letter}'.")
+
 try:
     from sense_hat import SenseHat
-except ImportError:
-    print("Error: The 'sense_hat' library is not installed. Please install it with 'pip install sense-hat'.")
-    SenseHat = None
-
-if SenseHat:
     sense = SenseHat()
     sense.low_light = True
-else:
-    sense = None
+except (ImportError, RuntimeError):
+    print("Warning: 'sense_hat' library not found or failed to initialize. Using mock display.")
+    sense = MockSenseHat()
 
 BLACK = [0,0,0]
 WHITE = [255,255,255]

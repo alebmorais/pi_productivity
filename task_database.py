@@ -15,6 +15,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable, List, Mapping, Sequence
 
+from utils import normalize_and_format_date, today_local
+
 _DEFAULT_DB_PATH = Path(
     os.getenv("PI_PRODUCTIVITY_DB", "~/pi_productivity/data/tasks.db")
 ).expanduser()
@@ -113,7 +115,7 @@ class TaskDatabase:
             or get("deadline")
             or get("end")
         )
-        due_date = self._normalise_due(raw_due)
+        due_date = normalize_and_format_date(raw_due)
 
         status = (
             get("status")
@@ -161,38 +163,13 @@ class TaskDatabase:
 
         return ""
 
-    @staticmethod
-    def _normalise_due(value: object | None) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, (int, float)):
-            try:
-                return datetime.fromtimestamp(float(value)).isoformat(timespec="seconds")
-            except Exception:  # noqa: BLE001
-                return None
-        if isinstance(value, str):
-            candidate = value.strip()
-            if not candidate:
-                return None
-            candidate = candidate.replace("Z", "+00:00")
-            for fmt in (None, "%Y-%m-%d"):
-                try:
-                    if fmt:
-                        dt = datetime.strptime(candidate[:10], fmt)
-                    else:
-                        dt = datetime.fromisoformat(candidate)
-                    return dt.isoformat(timespec="seconds")
-                except Exception:  # noqa: BLE001
-                    continue
-        return None
-
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
     def fetch_items_for_display(self, limit: int = 6) -> List[dict]:
         """Return a list of simplified entries for the e-paper display."""
 
-        today = date.today()
+        today = today_local()
         try:
             with self._connect() as conn:
                 rows = conn.execute(

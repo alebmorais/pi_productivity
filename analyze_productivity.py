@@ -1,13 +1,6 @@
-# Dependência para gráficos (dentro do seu venv):
-# pip install matplotlib (execute este comando no terminal, não no script Python)
-
-# Cria a pasta de análises
 import os
-os.makedirs("analytics", exist_ok=True)
-
-# Cria o script de análise
-with open("analyze_productivity.py", "w", encoding="utf-8") as f:
-    f.write('''import os, csv, math
+import csv
+import math
 from datetime import datetime
 import argparse
 
@@ -170,56 +163,22 @@ def main():
                  os.path.join(args.outdir, "posture_vs_tasks_scatter.png"))
 
     # Relatório
-    with open(os.path.join(args.outdir, "report.txt"), "w", encoding="utf-8") as f:
-        f.write("Resumo da análise\\n")
-        f.write("=================\\n\\n")
-        f.write(f"Linhas no resumo diário: {len(rows)}\\n")
-        f.write(f"Correlação Pearson (ajustes vs concluídas): {r:.3f}\\n\\n")
+    report_path = os.path.join(args.outdir, "report.txt")
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("Resumo da análise\n")
+        f.write("=================\n\n")
+        f.write(f"Linhas no resumo diário: {len(rows)}\n")
+        f.write(f"Correlação Pearson (ajustes vs concluídas): {r:.3f}\n\n")
         if rows:
-            f.write("Últimos dias:\\n")
+            f.write("Últimos dias:\n")
             show = rows[-10:] if len(rows) > 10 else rows
             for rrow in show:
-                f.write(f"- {rrow['date']}: ajustes={rrow['posture_adjust']}, concluidas={rrow['tasks_completed']}\\n")
+                f.write(f"- {rrow['date']}: ajustes={rrow['posture_adjust']}, concluidas={rrow['tasks_completed']}\n")
 
     print("Análise concluída.")
     print(f"- CSV diário: {out_csv}")
-    print(f"- Gráficos: {os.path.join(args.outdir,'posture_per_day.png')}, {os.path.join(args.outdir,'tasks_completed_per_day.png')}, {os.path.join(args.outdir,'posture_vs_tasks_scatter.png')}")
-    print(f"- Relatório: {os.path.join(args.outdir,'report.txt')}")
-    
+    print(f"- Gráficos e relatório gerados em: {args.outdir}")
+    print(f"- Relatório: {report_path}")
+
 if __name__ == "__main__":
     main()
-''')
-
-# 2) Como rodar a análise
-#
-# Com o venv ativo:
-#
-# cd ~/pi_productivity
-# source .venv/bin/activate
-# python analyze_productivity.py
-#
-#
-# Saídas (arquivos):
-#
-# ~/pi_productivity/analytics/summary_daily.csv
-#
-# ~/pi_productivity/analytics/posture_per_day.png
-#
-# ~/pi_productivity/analytics/tasks_completed_per_day.png
-#
-# ~/pi_productivity/analytics/posture_vs_tasks_scatter.png
-#
-# ~/pi_productivity/analytics/report.txt
-#
-# Abrir no Pi (interface gráfica):
-#
-# xdg-open ~/pi_productivity/analytics/posture_per_day.png
-# xdg-open ~/pi_productivity/analytics/tasks_completed_per_day.png
-# xdg-open ~/pi_productivity/analytics/posture_vs_tasks_scatter.png
-# xdg-open ~/pi_productivity/analytics/report.txt
-#
-#
-# Se preferir, dá para ajustar a localização dos CSVs com:
-#
-# python analyze_productivity.py --posture ~/pi_productivity/logs/posture_events.csv --tasks
-#

@@ -1,293 +1,136 @@
+# Pi Productivity Dashboard
 
----
+This project turns a Raspberry Pi into a personal productivity and focus-assistance system. It integrates a web dashboard, posture monitoring, task management, and hardware like a Sense HAT and an e-paper display to help you stay on track.
 
-## Câmera: Postura e OCR de Anotações
+## Features
 
-### Dependências de SO
+- **Web Dashboard**: A web interface to view the camera feed, sensor data from the Sense HAT, and manage tasks.
+- **Posture Monitoring**: Uses the Raspberry Pi camera and OpenCV to periodically check your posture and provide feedback.
+- **Task Management**: Syncs with the Motion app via its API to fetch and display your tasks.
+- **Focus Modes**: Utilizes the Sense HAT LED matrix for different timer-based modes (e.g., Study, Leisure).
+- **E-Paper Display**: Shows a persistent, low-power summary of your pending tasks.
+- **OCR for Notes**: Lets you capture handwritten notes with the camera and turn them into digital text and tasks.
+
+## Hardware Requirements
+
+- Raspberry Pi (3B+ or newer recommended)
+- Raspberry Pi Camera Module
+- Sense HAT
+- Waveshare 2.7inch e-Paper HAT
+
+## Setup and Installation
+
+These instructions are for a Raspberry Pi running the latest **Raspberry Pi OS (64-bit)**.
+
+### 1. Update System & Install Dependencies
+
+First, make sure your system is up-to-date and install the necessary libraries for computer vision, text recognition, and hardware interfacing.
+
 ```bash
-sudo apt update
-sudo apt install -y python3-picamera2 tesseract-ocr
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo apt-get install -y \
+    libcamera-dev \
+    python3-opencv \
+    tesseract-ocr \
+    libatlas-base-dev
 ```
 
-### Dependências Python
-Instale via `pip install -r requirements.txt`:
-- opencv-python
-- pytesseract
-- pillow
+### 2. Enable Hardware Interfaces
 
-Pi Productivity (Raspberry Pi 5 + Sense HAT + Camera)
+Use the Raspberry Pi Configuration tool to enable the camera and I2C interfaces.
 
-Ferramentas de produtividade com Raspberry Pi 5 (8GB), Sense HAT, câmera (Picamera2) e (opcional) display e-paper.
-Funcionalidades principais:
+```bash
+sudo raspi-config
+```
 
-Modos com padrões de LED (trabalho, estudo, lazer, tarefas, postura, OCR).
+Navigate to **3 Interface Options** and enable:
 
-Monitoramento de postura contínuo, com log em CSV e feedback visual.
+- **I1 Legacy Camera** (Enable legacy camera support for Picamera2)
+- **I2C** (For the Sense HAT and e-paper display)
 
-OCR de anotações → cria/conclui tasks no Motion (com label e due date).
+Reboot your Raspberry Pi when prompted.
 
-Lembrete de hidratação (gota azul-clara no LED) em intervalo configurável.
+### 3. Clone the Project
 
-Análise: gera gráficos e correlação (postura × tarefas concluídas).
+Clone this project repository to your Raspberry Pi.
 
-1) Hardware & SO
-
-Raspberry Pi 5 (8GB)
-
-Sense HAT encaixado no GPIO
-
-Camera (conector CSI) habilitada
-
-(Opcional) e-paper 1,53" — a integração visual será configurada depois
-
-Sistema: Raspberry Pi OS (Debian 12 Bookworm)
-
-2) Pré-requisitos do sistema
-# Atualizar índices
-sudo apt update
-
-# Bibliotecas principais (camera, opencv, tesseract, sense hat)
-sudo apt install -y python3-picamera2 python3-opencv tesseract-ocr python3-sense-hat
-
-# (opcional) idiomas extras do Tesseract
-# sudo apt install -y tesseract-ocr-por tesseract-ocr-eng tesseract-ocr-osd
-
-
-Importante: usamos python3-opencv do sistema para evitar conflitos com simplejpeg.
-Não instale opencv-python via pip.
-
-3) Clonar / copiar o projeto
-
-Coloque o projeto em ~/pi_productivity (home do usuário pi):
-
-cd ~
-# se já tem a pasta copiada, pule este passo
-# git clone ...  (ou scp da sua máquina)
-
-4) Ambiente Python
-
-Crie venv usando pacotes do sistema (para compartilhar OpenCV/numpy):
-
+```bash
+git clone https://github.com/alebmorais/pi_productivity.git ~/pi_productivity
 cd ~/pi_productivity
-python3 -m venv .venv --system-site-packages
+```
+
+### 4. Set Up Python Environment
+
+It is highly recommended to use a Python virtual environment to manage dependencies.
+
+```bash
+python3 -m venv .venv
 source .venv/bin/activate
+```
+
+*To exit the virtual environment later, just type `deactivate`.*
+
+Now, install the required Python packages:
+
+```bash
 pip install -r requirements.txt
+```
 
+### 5. Configure Environment Variables
 
-Se abrir nova sessão SSH no futuro:
-source ~/pi_productivity/.venv/bin/activate
+The application requires API keys and other settings, which are managed in a `.env` file.
 
-5) Configuração (.env)
+First, define the project's root directory. This is important for the application to locate its files.
 
-Crie a partir do exemplo:
+```bash
+export PI_PRODUCTIVITY_DIR=~/pi_productivity
+```
 
-cd ~/pi_productivity
-cp .env.example .env
+**Note:** You may want to add this line to your `~/.bashrc` file to make it permanent.
+
+Next, create the `.env` file:
+
+```bash
 nano .env
+```
 
+Add the following lines, replacing the placeholder values with your own:
 
-Campos principais:
+```ini
+MOTION_API_KEY="your_motion_api_key_here"
+```
 
-# Motion
-MOTION_API_KEY=coloque_sua_chave_aqui
-MOTION_ENABLE_OCR=1
-OCR_DEFAULT_DUE_DAYS=2
+Press `Ctrl+X`, then `Y`, and `Enter` to save and exit.
 
-# Loops automáticos
-AUTO_POSTURE=1
-POSTURE_INTERVAL_SEC=120
+## Running the Application
 
-AUTO_OCR=1
-OCR_INTERVAL_SEC=30   
+With your virtual environment still active (`source .venv/bin/activate`), run the main application:
 
-# Hidratação (LED com gota azul-clara)
-HYDRATE_ENABLE=1
-HYDRATE_INTERVAL_MIN=40
-HYDRATE_FLASHES=6
-HYDRATE_ON_SEC=0.25
-HYDRATE_OFF_SEC=0.15
-
-
-Segurança: não commit o .env. Trate sua MOTION_API_KEY como segredo.
-
-6) Como rodar
-cd ~/pi_productivity
-source .venv/bin/activate
+```bash
 python main.py
+```
 
+This single command starts the web server, initializes the hardware, and begins all background monitoring tasks.
 
-Você deve ver no terminal:
+- **Web Dashboard**: Open a browser on a device on the same network and go to `http://<your-pi-ip-address>:8000`.
+- **Sense HAT**: The joystick can be used to cycle through different modes.
+- **E-Paper Display**: The display will automatically update with your tasks from Motion.
 
-[Auto] Postura ligada (cada 120s)
-[Auto] OCR ligado (cada 30s)
-[Auto] Hidratação ligada (cada 40 min)
+To stop the application, press `Ctrl+C` in the terminal.
 
-7) Controles (Sense HAT — joystick)
+## Customization
 
-Cima / Baixo: alterna entre os modos. Ao mudar, o LED mostra o padrão do modo.
+You can easily customize the behavior of the application by editing the constants at the top of the `main.py` file:
 
-Direita:
+- `MOTION_ENABLE_OCR`: Set to `True` to automatically create Motion tasks from captured text, or `False` to disable.
+- `OCR_DEFAULT_DUE_DAYS`: The default number of days from now to set a task's due date if not specified in the OCR text.
+- `POSTURE_INTERVAL`: The time in seconds between automatic posture checks.
+- `OCR_INTERVAL`: The time in seconds between automatic OCR captures (if a dedicated OCR loop is active).
+- `MOTION_SYNC_INTERVAL`: The time in seconds between synchronizations with the Motion API.
 
-Em POSTURA → executa 1 ciclo de postura (pisca verde = ok, vermelho = ajustar).
+## Troubleshooting
 
-Em OCR NOTAS → executa 1 ciclo de OCR (pisca ciano ao concluir).
-
-Esquerda: reservado (ex.: abrir painel de tarefas no e-paper — implementar quando o display chegar).
-
-Mesmo sem acionar manualmente, os loops automáticos chamam periodicamente:
-
-Postura a cada POSTURE_INTERVAL_SEC
-
-OCR a cada OCR_INTERVAL_SEC
-
-8) Modos & padrões de LED
-
-TAREFAS: tabuleiro branco/preto (mostra painel quando o e-paper estiver pronto).
-
-TRABALHO: HAPVIDA: metade esquerda verde.
-
-TRABALHO: CARE PLUS: “X” azul.
-
-ESTUDO (TDAH): moldura amarela (técnica sugerida no display ao entrar no modo).
-
-LAZER: roxo sólido.
-
-POSTURA: cruz vermelha (monitoramento).
-
-OCR NOTAS: moldura e diagonal ciano (leitura/automação).
-
-Eventos:
-
-Postura OK → pisca verde; Ajustar → vermelho.
-
-OCR concluído → ciano.
-
-Hidratação (a cada HYDRATE_INTERVAL_MIN) → gota azul-clara piscando; volta ao padrão do modo depois.
-
-9) OCR → regras e integração com Motion
-
-Formato sugerido nas anotações:
-
-Revisão Bibliográfica
-
-- [ ] Ler artigo X
-- [x] Enviar e-mail Y
-DUE: 2025-10-05
-
-
-Regras:
-
-Título da seção (“Revisão Bibliográfica”) → vira label da task.
-
-- [ ] ou TODO: → cria tarefa (label = título).
-
-- [x] ou DONE: → conclui tarefa; se não existir, cria e conclui.
-
-DUE: YYYY-MM-DD → define prazo; se ausente, usa OCR_DEFAULT_DUE_DAYS (padrão 2 dias).
-
-Arquivos gerados pelo OCR:
-
-Imagem preprocessada: ~/pi_productivity/notes/note_YYYYmmdd_HHMMSS.png
-
-Texto extraído: ~/pi_productivity/notes/note_YYYYmmdd_HHMMSS.txt
-
-10) Logs e análise
-
-Logs:
-
-Postura (texto diário): ~/pi_productivity/logs/posture_YYYYMMDD.txt
-
-Postura (CSV cumulativo): ~/pi_productivity/logs/posture_events.csv
-Campos: timestamp, ok, reason, tilt_deg, nod_deg, session_adjustments, tasks_completed_today
-
-OCR/Tasks (CSV): ~/pi_productivity/logs/task_events.csv
-Campos: timestamp, action, section_title, task_name
-
-Análise (opcional):
-
-Script: analyze_productivity.py
-
-Saídas em ~/pi_productivity/analytics/:
-
-summary_daily.csv
-
-posture_per_day.png
-
-tasks_completed_per_day.png
-
-posture_vs_tasks_scatter.png
-
-report.txt (correlação)
-
-Como rodar:
-
-cd ~/pi_productivity
-source .venv/bin/activate
-python analyze_productivity.py
-
-11) Dicas & solução de problemas
-
-Camera/NumPy/simplejpeg: use pacotes do sistema:
-sudo apt install -y python3-picamera2 python3-opencv python3-numpy python3-simplejpeg
-
-OpenCV cv2.data ausente: já tratamos com paths fixos:
-/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml
-
-Sem GUI (SSH): xdg-open pode não funcionar via SSH. Para ver arquivos:
-
-Copie para seu computador:
-scp pi@<ip_do_pi>:/home/pi/pi_productivity/last_posture.jpg .
-
-Motion 401/400: verifique MOTION_API_KEY no .env.
-Teste rápido:
-
-python - <<'PY'
-import os, requests
-from dotenv import load_dotenv
-load_dotenv("/home/pi/pi_productivity/.env")
-api=os.getenv("MOTION_API_KEY")
-print(requests.get("https://api.usemotion.com/v1/tasks", headers={"X-API-Key":api}, timeout=15).status_code)
-PY
-
-
-Esperado: 200.
-
-Permissão em /mnt/data: não usamos esse caminho; tudo salva em ~/pi_productivity/....
-
-12) Próximos passos (e-paper)
-
-Quando o e-paper estiver conectado, ativaremos:
-
-render das tarefas do dia (Motion) com prazos
-
-modo TAREFAS atualiza o e-paper automaticamente
-
-atalhos no joystick (⬅️) para “atualizar painel”
-
-13) Comandos úteis
-# Ativar venv
-source ~/pi_productivity/.venv/bin/activate
-
-# Rodar app
-python ~/pi_productivity/main.py
-
-# Rodar análise
-python ~/pi_productivity/analyze_productivity.py
-
-# Editar configs
-nano ~/pi_productivity/.env
-
-# How to run the Pi loops (main.py)
-main.py drives the Sense HAT, posture/OCR camera loops, and hydration reminders. After activating the project’s virtualenv you can launch it in a single command:
-cd ~/pi_productivity && source .venv/bin/activate && python main.py
-
-# How to run the FastAPI web UI
-The companion FastAPI server lives in the WebApp entrypoint. Make sure the extra dependencies are installed:
-python -m pip install fastapi uvicorn[standard] jinja2 watchdog opencv-python numpy
-
-# Then start the web UI (defaults to 0.0.0.0:8090, override with WEBAPP_HOST/WEBAPP_PORT if needed) in one line:
-cd ~/pi_productivity && source .venv/bin/activate && python WebApp
-An alternative foreground launch that makes the host/port explicit is:
-cd ~/pi_productivity && source .venv/bin/activate && uvicorn WebApp:app --host 0.0.0.0 --port 8090
-
-# WebApp also exposes start_in_background() if you later decide to import it from main.py and keep both processes in the same interpreter.
+- **Motion API Errors (401/400)**: Double-check that your `MOTION_API_KEY` in the `.env` file is correct and does not contain any extra characters.
+- **Camera Not Detected**: Ensure the camera is securely connected and that you have enabled the legacy camera interface in `raspi-config`.
+- **Hardware Not Responding (Sense HAT / E-Paper)**: Check that the HATs are properly seated on the GPIO pins and that I2C is enabled. A reboot can sometimes resolve detection issues.

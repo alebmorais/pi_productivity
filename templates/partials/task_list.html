@@ -1,0 +1,15 @@
+<ul class="task-list">
+    {% for task in tasks %}
+    <li class="task-item">
+        <form action="/complete_task/{{ task.task_id }}" method="post" style="display: inline;">
+            <button type="submit" style="border:none; background:none; cursor:pointer; padding:0; font-size: 1.2em; vertical-align: middle;">✅</button>
+        </form>
+        <span title="{{ task.subtitle }}">{{ task.title }}</span>
+        {% if task.right %}
+        <small style="color: #555; margin-left: 1em;">({{ task.right }})</small>
+        {% endif %}
+    </li>
+    {% else %}
+    <li>No pending tasks. Great job!</li>
+    {% endfor %}
+</ul>

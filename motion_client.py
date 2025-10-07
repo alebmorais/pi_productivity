@@ -1,34 +1,50 @@
 import os, requests
 from dotenv import load_dotenv
+from pathlib import Path
 
-BASE_DIR = os.path.expanduser("~/pi_productivity")
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+BASE_DIR = Path(os.path.expanduser("~/pi_productivity"))
+dotenv_path = BASE_DIR / ".env"
+
+# Load .env.example as a fallback if .env doesn't exist
+if not dotenv_path.exists():
+    dotenv_path = BASE_DIR / ".env.example"
+    if dotenv_path.exists():
+        print(f"Warning: .env file not found. Falling back to {dotenv_path}")
+
+load_dotenv(dotenv_path=dotenv_path)
 
 BASE = "https://api.usemotion.com/v1"
 
 class MotionClient:
     def __init__(self):
-        api = os.getenv("MOTION_API_KEY","").strip()
-        if not api:
-            raise RuntimeError("Defina MOTION_API_KEY no arquivo .env")
+        self.api_key = os.getenv("MOTION_API_KEY", "").strip()
         self.sess = requests.Session()
-        self.sess.headers.update({
-            "Authorization": f"Bearer {api}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        })
+        if self.api_key:
+            self.sess.headers.update({
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            })
+        else:
+            print("Warning: MOTION_API_KEY not set. Motion client will be non-functional.")
 
     def get(self, path, params=None):
+        if not self.api_key:
+            raise RuntimeError("MOTION_API_KEY is not configured.")
         r = self.sess.get(f"{BASE}{path}", params=params or {}, timeout=15)
         r.raise_for_status()
         return r.json()
 
     def post(self, path, payload):
+        if not self.api_key:
+            raise RuntimeError("MOTION_API_KEY is not configured.")
         r = self.sess.post(f"{BASE}{path}", json=payload, timeout=15)
         r.raise_for_status()
         return r.json()
 
     def patch(self, path, payload):
+        if not self.api_key:
+            raise RuntimeError("MOTION_API_KEY is not configured.")
         r = self.sess.patch(f"{BASE}{path}", json=payload, timeout=15)
         r.raise_for_status()
         return r.json()
@@ -81,6 +97,8 @@ class MotionClient:
         return tasks_list, next_cursor, cursor_param
 
     def list_all_tasks_simple(self, limit=200):
+        if not self.api_key:
+            return []
         max_limit = 100  # Motion caps the page size at 100 items.
         tasks = []
         remaining = None if limit is None else max(0, int(limit))

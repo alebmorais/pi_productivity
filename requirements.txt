@@ -1,12 +1,14 @@
 fastapi
 jinja2
+matplotlib
 numpy
+opencv-python
+picamera2
 Pillow
 python-dotenv
 pytesseract
 requests
 sense-hat
 uvicorn[standard]
-opencv-python
-picamera2
 watchdog
+waveshare-epd
