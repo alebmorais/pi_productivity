@@ -6,6 +6,8 @@ import threading
 import asyncio
 import json
 import time
+import traceback
+import logging # O logging é ainda melhor, mas traceback é o que o exemplo usa
 from datetime import datetime
 from contextlib import suppress
 from pathlib import Path
@@ -355,9 +357,19 @@ async def run_ocr_endpoint():
     try:
         img_path, txt_path, text = await run_in_threadpool(sense.run_ocr_once)
         return JSONResponse({"status": "success", "image_path": img_path, "text_path": txt_path, "text": text})
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+   except Exception as e:
+        # 1. (SEGURO) Loga o erro completo no seu terminal/console
+        # Assim VOCÊ pode ver o que deu errado.
+        print("--- ERRO NO ENDPOINT DE OCR ---")
+        traceback.print_exc()
+        print("-------------------------------")
 
+        # 2. (SEGURO) Envia uma mensagem genérica para o usuário
+        # O usuário/invasor não vê nenhuma informação sensível.
+        return JSONResponse(
+            {"status": "error", "message": "Ocorreu um erro interno ao processar a imagem."}, 
+            status_code=500
+        )
 @app.get("/camera.jpg")
 async def camera_jpeg():
     frame = await run_in_threadpool(sense.read_jpeg)
