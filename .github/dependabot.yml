@@ -1,19 +1,17 @@
-# Configuração para atualizar dependências de Python (pip)
+version: 2
+updates:
   - package-ecosystem: "pip"
-    directory: "/" # O 'requirements.txt' está na raiz do projeto
+    directory: "/"
     schedule:
       interval: "weekly"
-    # Adiciona uma mensagem de commit clara
     commit-message:
       prefix: "deps(pip)"
       include: "scope"
 
-  # Configuração para atualizar GitHub Actions
   - package-ecosystem: "github-actions"
-    directory: "/" # Verifica os workflows em .github/workflows
+    directory: "/"
     schedule:
       interval: "weekly"
-    # Adiciona uma mensagem de commit clara
     commit-message:
       prefix: "deps(actions)"
       include: "scope"
