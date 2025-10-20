@@ -11,18 +11,15 @@ on:
 
 # MELHORIA DE SEGURANÇA:
 # Define as permissões padrão para todo o workflow como 'read-none'.
-# Isso é uma boa prática de segurança (princípio do menor privilégio).
-# O token do GitHub não terá permissões por padrão.
 permissions: read-none
 
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
-    
+
     # PERMISSÕES DO JOB:
-    # Damos permissões específicas APENAS para este job,
-    # que são necessárias para ele funcionar.
+    # Damos permissões específicas APENAS para este job.
     permissions:
       security-events: write # Necessário para o CodeQL postar alertas
       actions: read          # Necessário para ler actions (boa prática)
@@ -33,8 +30,7 @@ jobs:
       matrix:
         include:
           # CORREÇÃO DO ERRO:
-          # Removi a linguagem 'actions' daqui.
-          # Agora ele só vai analisar as linguagens que você realmente tem:
+          # Removi a linguagem 'actions'
           - language: javascript-typescript
             build-mode: none
           - language: python
@@ -47,7 +43,7 @@ jobs:
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4
       with:
-        languages: ${{ matrix.language }}
+        languages: ${{ matrix.languag-e }}
         build-mode: ${{ matrix.build-mode }}
 
     - name: Run manual build steps
