@@ -51,16 +51,42 @@ document.addEventListener('DOMContentLoaded', () => {
             li.textContent = 'No pending tasks. Great job!';
             list.appendChild(li);
         } else {
-            tasks.forEach(task => {
+            tasks.forEach((task) => {
                 const li = document.createElement('li');
                 li.className = 'task-item';
-                li.innerHTML = `
-                    <form action="/complete_task/${task.task_id}" method="post" class="complete-form">
-                        <button type="submit">✅</button>
-                    </form>
-                    <span title="${task.subtitle || ''}">${task.title}</span>
-                    ${task.right ? `<small>(${task.right})</small>` : ''}
-                `;
+
+                // Form (encode task_id to avoid path injection)
+                const form = document.createElement('form');
+                form.className = 'complete-form';
+                form.method = 'post';
+                const taskId = task && task.task_id != null ? String(task.task_id) : '';
+                form.action = `/complete_task/${encodeURIComponent(taskId)}`;
+
+                const button = document.createElement('button');
+                button.type = 'submit';
+                button.textContent = '✅';
+                form.appendChild(button);
+
+                // Title span
+                const span = document.createElement('span');
+                const title = task && task.title != null ? String(task.title) : '';
+                span.textContent = title;
+
+                // Tooltip subtitle (attribute value, not HTML)
+                if (task && task.subtitle != null && task.subtitle !== '') {
+                    span.setAttribute('title', String(task.subtitle));
+                }
+
+                li.appendChild(form);
+                li.appendChild(span);
+
+                // Optional right-side note
+                if (task && task.right != null && task.right !== '') {
+                    const small = document.createElement('small');
+                    small.textContent = `(${String(task.right)})`;
+                    li.appendChild(small);
+                }
+
                 list.appendChild(li);
             });
         }
