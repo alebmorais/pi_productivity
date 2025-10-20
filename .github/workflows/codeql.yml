@@ -10,8 +10,9 @@ on:
     - cron: '16 8 * * 1'
 
 # MELHORIA DE SEGURANÇA:
-# Define as permissões padrão para todo o workflow como 'read-none'.
-permissions: read-none
+# Define as permissões padrão para todo o workflow como 'nenhuma'.
+# Esta é a sintaxe correta para o princípio do menor privilégio.
+permissions: {}
 
 jobs:
   analyze:
@@ -19,10 +20,10 @@ jobs:
     runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
 
     # PERMISSÕES DO JOB:
-    # Damos permissões específicas APENAS para este job.
+    # Agora damos permissões específicas APENAS para este job.
     permissions:
       security-events: write # Necessário para o CodeQL postar alertas
-      actions: read          # Necessário para ler actions (boa prática)
+      actions: read          # Necessário para ler actions
       contents: read         # Necessário para o step 'actions/checkout'
 
     strategy:
@@ -30,7 +31,7 @@ jobs:
       matrix:
         include:
           # CORREÇÃO DO ERRO:
-          # Removi a linguagem 'actions'
+          # Linguagem 'actions' removida
           - language: javascript-typescript
             build-mode: none
           - language: python
@@ -43,7 +44,7 @@ jobs:
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4
       with:
-        languages: ${{ matrix.languag-e }}
+        languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
 
     - name: Run manual build steps
