@@ -1,8 +1,0 @@
-.github/workflows/dependabot.yml
-version: 2
-updates:
-  - package-ecosystem: "npm"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-  # Add other package-ecosystems as needed (e.g., "github-actions", "pip", etc.)
