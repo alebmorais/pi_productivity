@@ -21,3 +21,7 @@ venv/
 # ===== OUTROS =====
 .DS_Store
 *.swp
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
