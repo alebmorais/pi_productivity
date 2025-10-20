@@ -1,0 +1,62 @@
+# Caminho: .github/workflows/codeql.yml
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '16 8 * * 1'
+
+# MELHORIA DE SEGURANÇA:
+# Define as permissões padrão para todo o workflow como 'read-none'.
+# Isso é uma boa prática de segurança (princípio do menor privilégio).
+# O token do GitHub não terá permissões por padrão.
+permissions: read-none
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    
+    # PERMISSÕES DO JOB:
+    # Damos permissões específicas APENAS para este job,
+    # que são necessárias para ele funcionar.
+    permissions:
+      security-events: write # Necessário para o CodeQL postar alertas
+      actions: read          # Necessário para ler actions (boa prática)
+      contents: read         # Necessário para o step 'actions/checkout'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CORREÇÃO DO ERRO:
+          # Removi a linguagem 'actions' daqui.
+          # Agora ele só vai analisar as linguagens que você realmente tem:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+
+    - name: Run manual build steps
+      if: matrix.build-mode == 'manual'
+      shell: bash
+      run: |
+        echo 'Passo de build manual (ignorado, pois build-mode é "none")'
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:${{matrix.language}}"
