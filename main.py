@@ -249,10 +249,36 @@ class PiProductivity:
 
     # --- UI and Hardware Interaction ---
     def _render_mode_banner(self):
-        name = self.MODES[self.mode_index]
-        print(f"[Sense] Mode: {name}")
-        # self._show_mode_pattern(name) # This function was not defined, assuming it's in sense_mode
-        self._update_epaper_display(name)
+        """Provides immediate visual feedback on the Sense HAT for the current mode."""
+        name = self.active_mode_name
+        print(f"[Sense] Displaying banner for mode: {name}")
+
+        color = sense_mode.BLUE
+        letter = "?"
+
+        if name == "posture_check":
+            letter = "P"
+            color = [0, 0, 200] # Dark Blue
+        elif name == "ocr_capture":
+            letter = "O"
+            color = [0, 200, 0] # Dark Green
+        elif name == "hapvida":
+            letter = "H"
+            color = sense_mode.GREEN
+        elif name == "careplus":
+            letter = "C"
+            color = sense_mode.BLUE
+        elif name == "study_adhd":
+            letter = "S"
+            color = [200, 100, 0] # Orange
+        elif name == "leisure":
+            letter = "L"
+            color = [150, 0, 200] # Purple
+        
+        if letter != "?":
+            sense_mode.sense.show_letter(letter, back_colour=color)
+        else:
+            sense_mode.sense.clear()
 
     def _update_epaper_display(self, mode_name):
         if not self.epaper_display:
@@ -260,24 +286,31 @@ class PiProductivity:
         # ... (epaper rendering logic) ...
         pass
 
+    def set_sense_mode(self, mode_name: str):
+        """Stops the current mode, sets the new one, and provides feedback."""
+        self.stop_current_mode()
+        self.active_mode_name = mode_name
+        
+        # Always show banner for immediate feedback
+        self._render_mode_banner()
+        time.sleep(0.5) # Give user time to see the banner
+
+        # If it's a timer-based mode, start its thread.
+        # Its animation will overwrite the banner, which is expected.
+        if mode_name in self.sense_modes:
+            self.active_mode = self.sense_modes[mode_name]
+            self.active_mode.start()
+            print(f"Started active Sense HAT mode: {mode_name}")
+        else:
+            print(f"Set passive Sense HAT mode: {mode_name}")
+
+        return self.active_mode_name
+
     def handle_joystick(self, event):
         if event.action != "pressed":
             return
 
-        current_mode_name = self.MODES[self.mode_index]
-        
-        # O botão do meio agora aciona a ação do modo ATUAL
-        if event.direction == "middle":
-            print(f"Joystick middle press detected. Current mode: {current_mode_name}")
-            if "posture" in current_mode_name:
-                run_in_threadpool(self.run_posture_once)
-                print("Triggered posture check from joystick.")
-            elif "ocr" in current_mode_name:
-                run_in_threadpool(self.run_ocr_once)
-                print("Triggered OCR from joystick.")
-            return
-
-        # Navegação para cima/baixo ou esquerda/direita muda o modo
+        # Navigation changes the mode
         delta = 0
         if event.direction in ("right", "up"):
             delta = 1
@@ -287,35 +320,49 @@ class PiProductivity:
         if delta != 0:
             self.mode_index = (self.mode_index + delta) % len(self.MODES)
             new_mode_name = self.MODES[self.mode_index]
-            print(f"Joystick changed mode to: {new_mode_name}")
+            print(f"Joystick changing mode to: {new_mode_name}")
             self.set_sense_mode(new_mode_name)
+            return
+
+        # Middle button triggers the action for the CURRENT mode
+        if event.direction == "middle":
+            current_mode_name = self.active_mode_name
+            print(f"Joystick middle press detected. Action for mode: {current_mode_name}")
+            if "posture" in current_mode_name:
+                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
+                run_in_threadpool(self.run_posture_once)
+                print("Triggered posture check from joystick.")
+            elif "ocr" in current_mode_name:
+                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
+                run_in_threadpool(self.run_ocr_once)
+                print("Triggered OCR from joystick.")
+            return
 
     def run_forever(self):
         print("Starting background hardware loop...")
-        # Garante que o handler do joystick está configurado
+        # Ensure joystick handler is set
         if hasattr(sense_mode.sense, 'stick'):
             sense_mode.sense.stick.direction_any = self.handle_joystick
         
-        # Define o modo inicial
+        # Set initial mode
         self.set_sense_mode(self.MODES[self.mode_index])
         
         while True:
             now = time.time()
             try:
-                # Tarefas de polling
                 self.maybe_poll_motion()
 
-                # Verificação periódica de postura
+                # Periodic posture check
                 if (now - self._last_posture_check) > POSTURE_INTERVAL:
                     self._last_posture_check = now
                     print("Running periodic posture check...")
-                    self.run_posture_once()
+                    # Run in a thread to avoid blocking the loop
+                    threading.Thread(target=self.run_posture_once, daemon=True).start()
 
             except Exception as e:
                 print(f"Error in background loop: {e}")
                 traceback.print_exc()
             
-            # O sleep principal pode ser mais curto para responsividade
             time.sleep(15)
 
 # --- FastAPI Setup ---
