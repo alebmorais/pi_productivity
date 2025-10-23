@@ -122,12 +122,13 @@ class PiProductivity:
             self.active_mode.start()
             self.active_mode_name = mode_name
             print(f"Started Sense HAT mode: {mode_name}")
+            # Timer-based modes control their own display, so we don't call the banner.
         else:
-            # Para modos que não são de timer, como 'posture_check' e 'ocr_capture'
+            # For non-timer modes, we set the name and show the banner.
             self.active_mode_name = mode_name
             print(f"Set passive Sense HAT mode: {mode_name}")
+            self._render_mode_banner()
 
-        self._render_mode_banner()
         return self.active_mode_name
 
     # --- Logging ---
