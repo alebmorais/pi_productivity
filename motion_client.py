@@ -106,27 +106,16 @@ class MotionClient:
     def list_all_tasks_simple(self, limit=200):
         if not self.api_key:
             return []
-        max_limit = 100  # Motion caps the page size at 100 items.
         tasks = []
-        remaining = None if limit is None else max(0, int(limit))
         cursor = None
         cursor_param = None
 
         while True:
             params = {}
-            # Note: workspaceId is often not needed as a query param if your API key
-            # is scoped to a single workspace. Omitting to avoid 400 Bad Request.
-            # If you need it, add MOTION_WORKSPACE_ID to .env and uncomment below:
-            # if self.workspace_id:
-            #     params["workspaceId"] = self.workspace_id
+            # Note: Motion API v1 does not accept 'limit' or 'workspaceId' as query params.
+            # The API returns all tasks for the authenticated workspace automatically.
+            # Pagination is handled via cursor if the API provides one.
             
-            if remaining is None:
-                params["limit"] = max_limit
-            elif remaining == 0:
-                break
-            else:
-                params["limit"] = min(remaining, max_limit)
-
             if cursor and cursor_param:
                 params[cursor_param] = cursor
 
@@ -136,10 +125,9 @@ class MotionClient:
                 page_tasks = []
             tasks.extend(page_tasks)
 
-            if remaining is not None:
-                remaining = max(0, remaining - len(page_tasks))
-                if remaining == 0:
-                    break
+            # If we have a limit and we've exceeded it, stop fetching more pages
+            if limit is not None and len(tasks) >= limit:
+                break
 
             if not next_cursor:
                 break
@@ -147,7 +135,8 @@ class MotionClient:
             cursor = next_cursor
             cursor_param = next_cursor_param
 
-        if remaining is not None and len(tasks) > limit:
+        # Trim to the requested limit
+        if limit is not None and len(tasks) > limit:
             tasks = tasks[:limit]
 
         return tasks
