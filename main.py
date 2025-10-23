@@ -286,8 +286,8 @@ app = FastAPI(title="pi_productivity Web UI")
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# --- Global Instance ---
-sense = PiProductivity()
+# --- Global Instance (created at startup to avoid hardware init during import) ---
+sense = None
 
 # 1. Define the Broadcaster class
 class Broadcaster:
@@ -394,16 +394,35 @@ async def broadcast_loop():
 
 @app.on_event("startup")
 async def on_startup():
+    # Instantiate the main application object here so hardware initialization
+    # (camera, e-paper, GPIO) happens during FastAPI startup where failures
+    # can be handled without breaking module import.
+    global sense
+    if sense is None:
+        try:
+            sense = PiProductivity()
+        except Exception as e:
+            print(f"Warning: Failed to initialize PiProductivity at startup: {e}")
+            sense = None
     if not POSTURE_CSV.exists():
-        sense.log_event(POSTURE_CSV, ["timestamp", "ok", "reason", "tilt_deg", "nod_deg", "session_adjustments", "tasks_completed_today"], {"timestamp": datetime.now().isoformat(), "ok": True, "reason": "startup", "tilt_deg": 0, "nod_deg": 0, "session_adjustments": 0, "tasks_completed_today": 0})
+        if sense is not None:
+            sense.log_event(POSTURE_CSV, ["timestamp", "ok", "reason", "tilt_deg", "nod_deg", "session_adjustments", "tasks_completed_today"], {"timestamp": datetime.now().isoformat(), "ok": True, "reason": "startup", "tilt_deg": 0, "nod_deg": 0, "session_adjustments": 0, "tasks_completed_today": 0})
     if not TASK_CSV.exists():
-        sense.log_task_event("create", "Setup project")
-    
+        if sense is not None:
+            sense.log_task_event("create", "Setup project")
+
+    # If sense init failed, don't start background hardware loop or broadcast.
+    if sense is None:
+        print("Warning: PiProductivity failed to initialize. Hardware features will be disabled.")
+        print(f"Log files are located in: {LOG_DIR}")
+        print("Starting FastAPI server without hardware integrations...")
+        return
+
     thread = threading.Thread(target=sense.run_forever, daemon=True)
     thread.start()
-    
+
     asyncio.create_task(broadcast_loop())
-    
+
     print(f"Database is located at: {sense.db.path}")
     print(f"Log files are located in: {LOG_DIR}")
     print("Starting FastAPI server...")
