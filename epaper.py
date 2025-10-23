@@ -2,12 +2,17 @@ import os
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-# Attempt to import the real EPD library
+# Attempt to import the real EPD library.
+# The Waveshare driver may attempt to claim GPIO pins at import time and
+# raise low-level errors (e.g. lgpio.error 'GPIO busy').
+# Catch any Exception here and fall back to a mock implementation so the
+# web server can run even if the display (or GPIO) is unavailable.
 try:
-    from waveshare_epd import epd1in54_V2
+    from waveshare_epd import epd1in54_V2  # type: ignore
     EPD_AVAILABLE = True
-except (ImportError, RuntimeError):
+except Exception as e:  # Broad catch: ImportError, RuntimeError, lgpio.error, etc.
     EPD_AVAILABLE = False
+    print(f"Warning: waveshare_epd import failed or unavailable: {e}")
 
 class EPD:
     """A wrapper for the e-paper display, with a mock for non-Pi development."""
