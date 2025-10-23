@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Mapping, Sequence
 
@@ -166,10 +166,28 @@ class TaskDatabase:
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _get_week_range(today: date) -> tuple[str, str]:
+        """Return (start_of_week, end_of_week) as ISO strings for the current week.
+        
+        Week starts on Monday (weekday=0) and ends on Sunday (weekday=6).
+        """
+        # Calculate days since Monday
+        days_since_monday = today.weekday()  # Monday=0, Sunday=6
+        start_of_week = today - timedelta(days=days_since_monday)
+        end_of_week = start_of_week + timedelta(days=6)
+        
+        return start_of_week.isoformat(), end_of_week.isoformat()
+
     def fetch_items_for_display(self, limit: int = 6) -> List[dict]:
-        """Return a list of simplified entries for the e-paper display."""
+        """Return a list of simplified entries for the e-paper display.
+        
+        Only shows tasks due within the current week (Monday to Sunday).
+        """
 
         today = today_local()
+        week_start, week_end = self._get_week_range(today)
+        
         try:
             with self._connect() as conn:
                 rows = conn.execute(
@@ -177,13 +195,15 @@ class TaskDatabase:
                     SELECT task_id, title, subtitle, due_date, status
                     FROM tasks
                     WHERE COALESCE(LOWER(status), 'pending') NOT IN ('completed', 'done', 'cancelled', 'canceled', 'archived')
+                      AND due_date IS NOT NULL
+                      AND due_date >= ?
+                      AND due_date <= ?
                     ORDER BY
-                        CASE WHEN due_date IS NULL THEN 1 ELSE 0 END,
                         due_date ASC,
                         updated_at DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    (week_start, week_end, limit),
                 ).fetchall()
         except sqlite3.Error as exc:
             return [
@@ -197,8 +217,8 @@ class TaskDatabase:
         if not rows:
             return [
                 {
-                    "title": "Sem tarefas pendentes",
-                    "subtitle": "Aproveite para descansar!",
+                    "title": "Sem tarefas esta semana",
+                    "subtitle": "Aproveite para planejar ou descansar!",
                     "right": "",
                 }
             ]
