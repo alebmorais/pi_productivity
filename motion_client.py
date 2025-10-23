@@ -33,7 +33,13 @@ class MotionClient:
         if not self.api_key:
             raise RuntimeError("MOTION_API_KEY is not configured.")
         r = self.sess.get(f"{BASE}{path}", params=params or {}, timeout=15)
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except requests.HTTPError as e:
+            # Log detailed error info for debugging
+            print(f"[Motion API Error] {e}")
+            print(f"[Motion API Error] Response body: {r.text}")
+            raise
         return r.json()
 
     def post(self, path, payload):
@@ -108,8 +114,11 @@ class MotionClient:
 
         while True:
             params = {}
-            if self.workspace_id:                                   # <--- ADICIONE ESTA LINHA
-                params["workspaceId"] = self.workspace_id
+            # Note: workspaceId is often not needed as a query param if your API key
+            # is scoped to a single workspace. Omitting to avoid 400 Bad Request.
+            # If you need it, add MOTION_WORKSPACE_ID to .env and uncomment below:
+            # if self.workspace_id:
+            #     params["workspaceId"] = self.workspace_id
             
             if remaining is None:
                 params["limit"] = max_limit
