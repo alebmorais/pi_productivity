@@ -77,11 +77,14 @@ class PiProductivity:
         }
         self.active_mode = None
         self.active_mode_name = "none"
+        
+        # Adiciona os modos especiais que não são baseados em timer
+        self.MODES = ["posture_check", "ocr_capture"] + list(self.sense_modes.keys())
         self.mode_index = 0
-        self.MODES = list(self.sense_modes.keys())
 
         # State
         self._last_motion_sync = 0
+        self._last_posture_check = 0
         self.posture_adjust_count = 0
         self.tasks_completed_today = 0
 
@@ -91,7 +94,8 @@ class PiProductivity:
             return None
         try:
             cam = Picamera2()
-            config = cam.create_still_configuration(main={"size": (1280, 720)})
+            # Reduzir a resolução pode acelerar a captura e o processamento
+            config = cam.create_still_configuration(main={"size": (1024, 576)})
             cam.configure(config)
             cam.start()
             time.sleep(1)  # Allow camera to warm up
@@ -99,23 +103,31 @@ class PiProductivity:
             return cam
         except Exception as e:
             print(f"Error initializing camera: {e}")
+            traceback.print_exc()
             return None
 
     # --- Mode Management ---
     def stop_current_mode(self):
         if self.active_mode and self.active_mode.is_running():
             self.active_mode.stop()
+            print(f"Stopped Sense HAT mode: {self.active_mode_name}")
         self.active_mode = None
         self.active_mode_name = "none"
 
     def set_sense_mode(self, mode_name: str):
         self.stop_current_mode()
+        
         if mode_name in self.sense_modes:
             self.active_mode = self.sense_modes[mode_name]
             self.active_mode.start()
             self.active_mode_name = mode_name
             print(f"Started Sense HAT mode: {mode_name}")
-            self._render_mode_banner()
+        else:
+            # Para modos que não são de timer, como 'posture_check' e 'ocr_capture'
+            self.active_mode_name = mode_name
+            print(f"Set passive Sense HAT mode: {mode_name}")
+
+        self._render_mode_banner()
         return self.active_mode_name
 
     # --- Logging ---
@@ -248,17 +260,23 @@ class PiProductivity:
         pass
 
     def handle_joystick(self, event):
-        if event.action not in ("pressed", "held"):
-            return
-        
-        if event.direction == "middle":
-            current_mode_name = self.MODES[self.mode_index]
-            if "posture" in current_mode_name.lower():
-                self.run_posture_once()
-            elif "ocr" in current_mode_name.lower():
-                self.run_ocr_once()
+        if event.action != "pressed":
             return
 
+        current_mode_name = self.MODES[self.mode_index]
+        
+        # O botão do meio agora aciona a ação do modo ATUAL
+        if event.direction == "middle":
+            print(f"Joystick middle press detected. Current mode: {current_mode_name}")
+            if "posture" in current_mode_name:
+                run_in_threadpool(self.run_posture_once)
+                print("Triggered posture check from joystick.")
+            elif "ocr" in current_mode_name:
+                run_in_threadpool(self.run_ocr_once)
+                print("Triggered OCR from joystick.")
+            return
+
+        # Navegação para cima/baixo ou esquerda/direita muda o modo
         delta = 0
         if event.direction in ("right", "up"):
             delta = 1
@@ -267,19 +285,37 @@ class PiProductivity:
         
         if delta != 0:
             self.mode_index = (self.mode_index + delta) % len(self.MODES)
-            self.set_sense_mode(self.MODES[self.mode_index])
+            new_mode_name = self.MODES[self.mode_index]
+            print(f"Joystick changed mode to: {new_mode_name}")
+            self.set_sense_mode(new_mode_name)
 
     def run_forever(self):
         print("Starting background hardware loop...")
-        sense_mode.sense.stick.direction_any = self.handle_joystick
-        self._render_mode_banner()
+        # Garante que o handler do joystick está configurado
+        if hasattr(sense_mode.sense, 'stick'):
+            sense_mode.sense.stick.direction_any = self.handle_joystick
+        
+        # Define o modo inicial
+        self.set_sense_mode(self.MODES[self.mode_index])
         
         while True:
+            now = time.time()
             try:
+                # Tarefas de polling
                 self.maybe_poll_motion()
+
+                # Verificação periódica de postura
+                if (now - self._last_posture_check) > POSTURE_INTERVAL:
+                    self._last_posture_check = now
+                    print("Running periodic posture check...")
+                    self.run_posture_once()
+
             except Exception as e:
                 print(f"Error in background loop: {e}")
-            time.sleep(30)
+                traceback.print_exc()
+            
+            # O sleep principal pode ser mais curto para responsividade
+            time.sleep(15)
 
 # --- FastAPI Setup ---
 app = FastAPI(title="pi_productivity Web UI")
