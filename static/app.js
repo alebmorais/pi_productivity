@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const modeSelect = document.getElementById('mode-select');
     const presetStatusEl = document.getElementById('presetStatus');
     const ocrButton = document.getElementById('ocr-button');
+    const calendarContainerEl = document.getElementById('calendar-container');
 
     function formatNumber(value, decimals = 1) {
         const num = Number(value);
@@ -94,6 +95,83 @@ document.addEventListener('DOMContentLoaded', () => {
         taskContainerEl.appendChild(list);
     }
     
+    function updateCalendar(calendarData) {
+        if (!calendarContainerEl || !calendarData) return;
+        
+        const grid = document.createElement('div');
+        grid.className = 'calendar-grid';
+        
+        calendarData.days.forEach((day) => {
+            const dayDiv = document.createElement('div');
+            dayDiv.className = `calendar-day${day.is_today ? ' today' : ''}`;
+            
+            // Header
+            const header = document.createElement('div');
+            header.className = 'calendar-day-header';
+            
+            const dayName = document.createElement('div');
+            dayName.className = 'calendar-day-name';
+            dayName.textContent = day.day_name;
+            
+            const dayNumber = document.createElement('div');
+            dayNumber.className = 'calendar-day-number';
+            dayNumber.textContent = day.day_number;
+            
+            header.appendChild(dayName);
+            header.appendChild(dayNumber);
+            dayDiv.appendChild(header);
+            
+            // Tasks
+            const tasksDiv = document.createElement('div');
+            tasksDiv.className = 'calendar-tasks';
+            
+            if (day.tasks && day.tasks.length > 0) {
+                day.tasks.forEach((task) => {
+                    const taskDiv = document.createElement('div');
+                    taskDiv.className = 'calendar-task';
+                    taskDiv.title = task.subtitle || task.title;
+                    
+                    const titleDiv = document.createElement('div');
+                    titleDiv.className = 'calendar-task-title';
+                    titleDiv.textContent = task.title.length > 30 ? task.title.substring(0, 30) + '...' : task.title;
+                    
+                    taskDiv.appendChild(titleDiv);
+                    
+                    if (task.subtitle) {
+                        const subtitleDiv = document.createElement('div');
+                        subtitleDiv.className = 'calendar-task-subtitle';
+                        subtitleDiv.textContent = task.subtitle.length > 25 ? task.subtitle.substring(0, 25) + '...' : task.subtitle;
+                        taskDiv.appendChild(subtitleDiv);
+                    }
+                    
+                    tasksDiv.appendChild(taskDiv);
+                });
+            } else {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'calendar-empty';
+                emptyDiv.textContent = '—';
+                tasksDiv.appendChild(emptyDiv);
+            }
+            
+            dayDiv.appendChild(tasksDiv);
+            grid.appendChild(dayDiv);
+        });
+        
+        calendarContainerEl.innerHTML = '';
+        calendarContainerEl.appendChild(grid);
+    }
+    
+    async function loadCalendar() {
+        if (!calendarContainerEl) return;
+        try {
+            const response = await fetch('/api/week-calendar');
+            const data = await response.json();
+            updateCalendar(data);
+        } catch (err) {
+            console.error('Failed to load calendar', err);
+        }
+    }
+    
     function updateMode(modeName) {
         if (modeDisplayEl) {
             modeDisplayEl.textContent = `Mode: ${modeName.replace(/_/g, ' ')}`;
@@ -174,5 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     tickClock();
     setInterval(tickClock, 1000);
     setInterval(refreshCamera, 2000);
+    loadCalendar();
+    setInterval(loadCalendar, 30000); // Refresh calendar every 30 seconds
     initWS();
 });

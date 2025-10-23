@@ -376,6 +376,14 @@ async def camera_jpeg():
     data = frame or b'' # Return empty bytes if no frame
     return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
 
+@app.get("/api/week-calendar", response_class=JSONResponse)
+async def get_week_calendar():
+    """Return tasks grouped by day for the current week."""
+    if sense is None:
+        return JSONResponse({"error": "Service unavailable"}, status_code=503)
+    calendar_data = await run_in_threadpool(sense.db.fetch_week_calendar)
+    return JSONResponse(calendar_data)
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await bus.add(ws)

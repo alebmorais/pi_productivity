@@ -265,5 +265,88 @@ class TaskDatabase:
             return f"{dt.strftime('%a')}"
         return dt.strftime("%d/%m")
 
+    def fetch_week_calendar(self) -> dict:
+        """Return tasks grouped by day of the week for calendar view.
+        
+        Returns a dict with structure:
+        {
+            "week_start": "2025-10-21",
+            "week_end": "2025-10-27",
+            "days": [
+                {
+                    "date": "2025-10-21",
+                    "day_name": "Seg",
+                    "day_number": 21,
+                    "is_today": False,
+                    "tasks": [...]
+                },
+                ...
+            ]
+        }
+        """
+        today = today_local()
+        week_start, week_end = self._get_week_range(today)
+        
+        # Get all tasks for the week
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT task_id, title, subtitle, due_date, status, raw
+                    FROM tasks
+                    WHERE COALESCE(LOWER(status), 'pending') NOT IN ('completed', 'done', 'cancelled', 'canceled', 'archived')
+                      AND due_date IS NOT NULL
+                      AND due_date >= ?
+                      AND due_date <= ?
+                    ORDER BY due_date ASC, updated_at DESC
+                    """,
+                    (week_start, week_end),
+                ).fetchall()
+        except sqlite3.Error:
+            return {
+                "week_start": week_start,
+                "week_end": week_end,
+                "days": []
+            }
+        
+        # Group tasks by date
+        tasks_by_date = {}
+        for row in rows:
+            due_date = row["due_date"][:10] if row["due_date"] else None
+            if not due_date:
+                continue
+            if due_date not in tasks_by_date:
+                tasks_by_date[due_date] = []
+            
+            tasks_by_date[due_date].append({
+                "task_id": row["task_id"],
+                "title": row["title"],
+                "subtitle": row["subtitle"] or "",
+                "status": row["status"] or "pending"
+            })
+        
+        # Build calendar structure
+        days = []
+        start_date = datetime.fromisoformat(week_start).date()
+        day_names = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+        
+        for i in range(7):
+            current_date = start_date + timedelta(days=i)
+            date_str = current_date.isoformat()
+            
+            days.append({
+                "date": date_str,
+                "day_name": day_names[i],
+                "day_number": current_date.day,
+                "is_today": current_date == today,
+                "tasks": tasks_by_date.get(date_str, [])
+            })
+        
+        return {
+            "week_start": week_start,
+            "week_end": week_end,
+            "days": days
+        }
+
 
 __all__ = ["TaskDatabase"]
