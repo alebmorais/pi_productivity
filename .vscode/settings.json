@@ -1,4 +1,9 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:system",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "gemini-cli.debug.logging.enabled": true,
+    "geminicodeassist.agentDebugMode": true,
+    "geminicodeassist.agentYoloMode": true,
+    "geminicodeassist.codeGenerationPaneViewEnabled": true,
+    "geminicodeassist.inlineSuggestions.nextEditPredictions": true
 }
