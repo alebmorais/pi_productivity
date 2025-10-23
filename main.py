@@ -357,7 +357,7 @@ async def run_ocr_endpoint():
     try:
         img_path, txt_path, text = await run_in_threadpool(sense.run_ocr_once)
         return JSONResponse({"status": "success", "image_path": img_path, "text_path": txt_path, "text": text})
-   except Exception as e:
+    except Exception as e:
         # 1. (SEGURO) Loga o erro completo no seu terminal/console
         # Assim VOCÊ pode ver o que deu errado.
         print("--- ERRO NO ENDPOINT DE OCR ---")
