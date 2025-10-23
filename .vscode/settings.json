@@ -5,5 +5,6 @@
     "geminicodeassist.agentDebugMode": true,
     "geminicodeassist.agentYoloMode": true,
     "geminicodeassist.codeGenerationPaneViewEnabled": true,
-    "geminicodeassist.inlineSuggestions.nextEditPredictions": true
+    "geminicodeassist.inlineSuggestions.nextEditPredictions": true,
+    "debugpy.showPythonInlineValues": true
 }

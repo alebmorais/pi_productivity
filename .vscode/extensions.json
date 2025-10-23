@@ -1,6 +1,7 @@
 {
     "recommendations": [
         "google.geminicodeassist",
-        "google.gemini-cli-vscode-ide-companion"
+        "google.gemini-cli-vscode-ide-companion",
+        "ms-python.python"
     ]
 }
