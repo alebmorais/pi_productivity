@@ -18,6 +18,7 @@ BASE = "https://api.usemotion.com/v1"
 class MotionClient:
     def __init__(self):
         self.api_key = os.getenv("MOTION_API_KEY", "").strip()
+        self.workspace_id = os.getenv("MOTION_WORKSPACE_ID", "").strip() # <--- ADICIONE ESTA LINHA
         self.sess = requests.Session()
         if self.api_key:
             self.sess.headers.update({
@@ -107,6 +108,9 @@ class MotionClient:
 
         while True:
             params = {}
+            if self.workspace_id:                                   # <--- ADICIONE ESTA LINHA
+                params["workspaceId"] = self.workspace_id
+            
             if remaining is None:
                 params["limit"] = max_limit
             elif remaining == 0:
