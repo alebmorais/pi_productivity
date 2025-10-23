@@ -33,7 +33,9 @@ class EPD:
 
     def _init_display(self):
         if self.epd:
-            self.epd.init()
+            # isPartial=0 means full refresh (recommended for initial display)
+            # isPartial=1 would be for partial updates (faster but may have ghosting)
+            self.epd.init(0)
             self.epd.Clear()
 
     def _display_image(self, image):
