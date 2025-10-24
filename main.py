@@ -114,22 +114,6 @@ class PiProductivity:
         self.active_mode = None
         self.active_mode_name = "none"
 
-    def set_sense_mode(self, mode_name: str):
-        self.stop_current_mode()
-        
-        if mode_name in self.sense_modes:
-            self.active_mode = self.sense_modes[mode_name]
-            self.active_mode.start()
-            self.active_mode_name = mode_name
-            print(f"Started Sense HAT mode: {mode_name}")
-            # Timer-based modes control their own display, so we don't call the banner.
-        else:
-            # For non-timer modes, we set the name and show the banner.
-            self.active_mode_name = mode_name
-            print(f"Set passive Sense HAT mode: {mode_name}")
-            self._render_mode_banner()
-
-        return self.active_mode_name
 
     def set_sense_mode_by_name(self, mode_name: str):
         """Sets the Sense HAT mode by its name."""
@@ -341,11 +325,11 @@ class PiProductivity:
             print(f"Joystick middle press detected. Action for mode: {current_mode_name}")
             if "posture" in current_mode_name:
                 sense_mode.sense.clear([255, 255, 0]) # Yellow flash
-                run_in_threadpool(self.run_posture_once)
+                asyncio.create_task(run_in_threadpool(self.run_posture_once))
                 print("Triggered posture check from joystick.")
             elif "ocr" in current_mode_name:
                 sense_mode.sense.clear([255, 255, 0]) # Yellow flash
-                run_in_threadpool(self.run_ocr_once)
+                asyncio.create_task(run_in_threadpool(self.run_ocr_once))
                 print("Triggered OCR from joystick.")
             return
 
@@ -427,9 +411,9 @@ def get_sense_readings():
 
 def build_status_payload() -> dict:
     return {
-        "mode": sense.active_mode_name,
+        "mode": getattr(sense, "active_mode_name", "none") if sense is not None else "none",
         "sense": get_sense_readings(),
-        "tasks": sense.db.fetch_items_for_display(limit=20),
+        "tasks": sense.db.fetch_items_for_display(limit=20) if sense is not None else [],
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -438,17 +422,21 @@ def build_status_payload() -> dict:
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "sense_modes": sense.sense_modes.keys(),
-        "active_mode": sense.active_mode_name
+        "sense_modes": list(sense.sense_modes.keys()) if sense is not None else [],
+        "active_mode": sense.active_mode_name if sense is not None else "none"
     })
 
 @app.post("/sense/mode", response_class=JSONResponse)
 async def set_sense_mode_endpoint(mode_name: str = Form(...)):
+    if sense is None:
+        return JSONResponse({"status": "error", "message": "Service unavailable"}, status_code=503)
     new_mode = await run_in_threadpool(sense.set_sense_mode, mode_name)
     return JSONResponse({"status": "success", "mode": new_mode})
 
 @app.post("/ocr", response_class=JSONResponse)
 async def run_ocr_endpoint():
+    if sense is None:
+        return JSONResponse({"status": "error", "message": "Service unavailable"}, status_code=503)
     try:
         img_path, txt_path, text = await run_in_threadpool(sense.run_ocr_once)
         return JSONResponse({"status": "success", "image_path": img_path, "text_path": txt_path, "text": text})
@@ -467,8 +455,12 @@ async def run_ocr_endpoint():
         )
 @app.get("/camera.jpg")
 async def camera_jpeg():
-    frame = await run_in_threadpool(sense.read_jpeg)
-    data = frame or b'' # Return empty bytes if no frame
+    if sense is None:
+        # Return empty bytes if sense is not initialized
+        data = b''
+    else:
+        frame = await run_in_threadpool(sense.read_jpeg)
+        data = frame or b'' # Return empty bytes if no frame
     return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
 
 @app.get("/api/week-calendar", response_class=JSONResponse)
