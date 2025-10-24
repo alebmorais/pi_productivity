@@ -26,7 +26,9 @@ from camera_posture import PostureMonitor, PostureConfig
 
 # --- Configuration Loading ---
 BASE_DIR = Path(os.getenv("PI_PRODUCTIVITY_DIR", "~/pi_productivity")).expanduser()
+# Load env from the preferred base dir and also fall back to current working directory
 load_dotenv(BASE_DIR / ".env")
+load_dotenv()
 
 LOG_DIR = BASE_DIR / "logs"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -177,9 +179,27 @@ class PiProductivity:
         return None
 
     def run_posture_once(self):
+        # If no camera, don't raise; provide graceful no-op feedback
+        if self.camera is None:
+            try:
+                sense_mode.sense.show_letter("N", back_colour=[80, 80, 80])  # N = No camera
+                time.sleep(0.6)
+            except Exception:
+                pass
+            self._render_mode_banner()
+            return {"ok": True, "reason": "no_camera"}
+
         frame = self.capture_array()
         if frame is None:
-            raise ValueError("Failed to capture frame from camera.")
+            # Graceful fallback when capture fails
+            print("[Posture] Failed to capture frame from camera.")
+            try:
+                sense_mode.sense.show_letter("?", back_colour=[80, 0, 0])
+                time.sleep(0.6)
+            except Exception:
+                pass
+            self._render_mode_banner()
+            return {"ok": True, "reason": "capture_failed"}
         
         status = self.posture.analyze_frame(frame)
         self._log_posture_csv(status)
@@ -219,7 +239,11 @@ class PiProductivity:
         pass  # Placeholder for the detailed parsing and API calls
 
     def maybe_poll_motion(self):
-        if not self.motion_client or not self.motion_client.api_key:
+        if (
+            not self.motion_client
+            or not self.motion_client.api_key
+            or self.motion_client.api_key.strip().lower() in ("your_motion_api_key_here", "")
+        ):
             return
 
         now = time.time()
@@ -337,8 +361,11 @@ class PiProductivity:
     def run_forever(self):
         print("Starting background hardware loop...")
         # Ensure joystick handler is set
-        if hasattr(sense_mode.sense, 'stick'):
+        if hasattr(sense_mode.sense, 'stick') and sense_mode.sense.stick is not None:
             sense_mode.sense.stick.direction_any = self.handle_joystick
+            print("[Joystick] Handler registered successfully.")
+        else:
+            print("[Joystick] Not available (using mock or hardware not detected).")
 
         # Set initial mode
         self.set_sense_mode_by_name(self.MODES[self.mode_index])
@@ -348,8 +375,8 @@ class PiProductivity:
             try:
                 self.maybe_poll_motion()
 
-                # Periodic posture check
-                if (now - self._last_posture_check) > POSTURE_INTERVAL:
+                # Periodic posture check (only if camera available)
+                if self.camera is not None and (now - self._last_posture_check) > POSTURE_INTERVAL:
                     self._last_posture_check = now
                     print("Running periodic posture check...")
                     # Run in a thread to avoid blocking the loop
@@ -486,6 +513,19 @@ async def run_ocr_endpoint():
             {"status": "error", "message": "Ocorreu um erro interno ao processar a imagem."}, 
             status_code=500
         )
+
+@app.post("/api/sync", response_class=JSONResponse)
+async def trigger_motion_sync():
+    if sense is None:
+        return JSONResponse({"status": "error", "message": "Service unavailable"}, status_code=503)
+    try:
+        await run_in_threadpool(sense.maybe_poll_motion)
+        return JSONResponse({"status": "success"})
+    except Exception as e:
+        print("--- ERRO NO SYNC MANUAL ---")
+        traceback.print_exc()
+        print("---------------------------")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 @app.get("/camera.jpg")
 async def camera_jpeg():
     if sense is None:
