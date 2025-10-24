@@ -333,6 +333,7 @@ class PiProductivity:
                 print("Triggered OCR from joystick.")
             return
 
+    
     def run_forever(self):
         print("Starting background hardware loop...")
         # Ensure joystick handler is set
