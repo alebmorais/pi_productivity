@@ -1,17 +1,20 @@
 import os
 import csv
+import uuid
 import io
 import threading
 import asyncio
+import json
 import time
 import traceback
-from datetime import datetime, timezone
+import logging # O logging é ainda melhor, mas traceback é o que o exemplo usa
+from datetime import datetime
+from contextlib import suppress
 from pathlib import Path
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -26,9 +29,7 @@ from camera_posture import PostureMonitor, PostureConfig
 
 # --- Configuration Loading ---
 BASE_DIR = Path(os.getenv("PI_PRODUCTIVITY_DIR", "~/pi_productivity")).expanduser()
-# Load env from the preferred base dir and also fall back to current working directory
 load_dotenv(BASE_DIR / ".env")
-load_dotenv()
 
 LOG_DIR = BASE_DIR / "logs"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -100,8 +101,8 @@ class PiProductivity:
             time.sleep(1)  # Allow camera to warm up
             print("Camera initialized.")
             return cam
-        except Exception:
-            print("Error initializing camera.")
+        except Exception as e:
+            print(f"Error initializing camera: {e}")
             traceback.print_exc()
             return None
 
@@ -113,17 +114,22 @@ class PiProductivity:
         self.active_mode = None
         self.active_mode_name = "none"
 
+    def set_sense_mode(self, mode_name: str):
+        self.stop_current_mode()
+        
+        if mode_name in self.sense_modes:
+            self.active_mode = self.sense_modes[mode_name]
+            self.active_mode.start()
+            self.active_mode_name = mode_name
+            print(f"Started Sense HAT mode: {mode_name}")
+            # Timer-based modes control their own display, so we don't call the banner.
+        else:
+            # For non-timer modes, we set the name and show the banner.
+            self.active_mode_name = mode_name
+            print(f"Set passive Sense HAT mode: {mode_name}")
+            self._render_mode_banner()
 
-    def set_sense_mode_by_name(self, mode_name: str):
-        """Sets the Sense HAT mode by its name."""
-        return self._set_sense_mode(mode_name)
-
-    def set_sense_mode_by_index(self, mode_index: int):
-        """Sets the Sense HAT mode by its index in the MODES list."""
-        if 0 <= mode_index < len(self.MODES):
-            mode_name = self.MODES[mode_index]
-            return self._set_sense_mode(mode_name)
-        return "none"
+        return self.active_mode_name
 
     # --- Logging ---
     def log_event(self, file_path, fieldnames, event_data):
@@ -179,27 +185,9 @@ class PiProductivity:
         return None
 
     def run_posture_once(self):
-        # If no camera, don't raise; provide graceful no-op feedback
-        if self.camera is None:
-            try:
-                sense_mode.sense.show_letter("N", back_colour=[80, 80, 80])  # N = No camera
-                time.sleep(0.6)
-            except Exception:
-                pass
-            self._render_mode_banner()
-            return {"ok": True, "reason": "no_camera"}
-
         frame = self.capture_array()
         if frame is None:
-            # Graceful fallback when capture fails
-            print("[Posture] Failed to capture frame from camera.")
-            try:
-                sense_mode.sense.show_letter("?", back_colour=[80, 0, 0])
-                time.sleep(0.6)
-            except Exception:
-                pass
-            self._render_mode_banner()
-            return {"ok": True, "reason": "capture_failed"}
+            raise ValueError("Failed to capture frame from camera.")
         
         status = self.posture.analyze_frame(frame)
         self._log_posture_csv(status)
@@ -223,9 +211,8 @@ class PiProductivity:
         if MOTION_ENABLE_OCR and self.motion_client and text:
             try:
                 self._ocr_apply_to_motion(text)
-            except Exception as ocr_error:  # Renamed from 'e'
-                print(f"[OCR->Motion] Error: {ocr_error}")
-                traceback.print_exc()  # Add this if you want to see the full traceback
+            except Exception as e:
+                print(f"[OCR->Motion] Error: {e}")
 
         sense_mode.sense.show_letter("T", back_colour=sense_mode.BLUE)
         time.sleep(1)
@@ -233,17 +220,12 @@ class PiProductivity:
         return img_path, txt_path, text
 
     def _ocr_apply_to_motion(self, text):
-        """Apply OCR text to Motion service."""
         # (This logic remains complex and specific, keeping it encapsulated)
         # ... (previous _ocr_parse_actions and _iso_from_due_hint logic can be moved here or kept as helpers)
-        pass  # Placeholder for the detailed parsing and API calls
+        pass # Placeholder for the detailed parsing and API calls
 
     def maybe_poll_motion(self):
-        if (
-            not self.motion_client
-            or not self.motion_client.api_key
-            or self.motion_client.api_key.strip().lower() in ("your_motion_api_key_here", "")
-        ):
+        if not self.motion_client or not self.motion_client.api_key:
             return
 
         now = time.time()
@@ -262,9 +244,8 @@ class PiProductivity:
                 self.epaper_display.render_list(items, title="Pending Tasks")
                 print("[E-Paper] Display updated with latest tasks.")
 
-        except Exception as sync_error:
-            print(f"[Motion Sync] Error: {sync_error}")
-            traceback.print_exc()
+        except Exception as e:
+            print(f"[Motion Sync] Error: {e}")
 
     # --- UI and Hardware Interaction ---
     def _render_mode_banner(self):
@@ -305,7 +286,7 @@ class PiProductivity:
         # ... (epaper rendering logic) ...
         pass
 
-    def _set_sense_mode(self, mode_name: str):
+    def set_sense_mode(self, mode_name: str):
         """Stops the current mode, sets the new one, and provides feedback."""
         self.stop_current_mode()
         self.active_mode_name = mode_name
@@ -340,7 +321,7 @@ class PiProductivity:
             self.mode_index = (self.mode_index + delta) % len(self.MODES)
             new_mode_name = self.MODES[self.mode_index]
             print(f"Joystick changing mode to: {new_mode_name}")
-            self.set_sense_mode_by_name(new_mode_name)
+            self.set_sense_mode(new_mode_name)
             return
 
         # Middle button triggers the action for the CURRENT mode
@@ -348,78 +329,49 @@ class PiProductivity:
             current_mode_name = self.active_mode_name
             print(f"Joystick middle press detected. Action for mode: {current_mode_name}")
             if "posture" in current_mode_name:
-                sense_mode.sense.clear([255, 255, 0])  # Yellow flash
-                threading.Thread(target=self.run_posture_once, daemon=True).start()
+                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
+                run_in_threadpool(self.run_posture_once)
                 print("Triggered posture check from joystick.")
             elif "ocr" in current_mode_name:
-                sense_mode.sense.clear([255, 255, 0])  # Yellow flash
-                threading.Thread(target=self.run_ocr_once, daemon=True).start()
+                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
+                run_in_threadpool(self.run_ocr_once)
                 print("Triggered OCR from joystick.")
             return
 
-    
     def run_forever(self):
         print("Starting background hardware loop...")
         # Ensure joystick handler is set
-        if hasattr(sense_mode.sense, 'stick') and sense_mode.sense.stick is not None:
+        if hasattr(sense_mode.sense, 'stick'):
             sense_mode.sense.stick.direction_any = self.handle_joystick
-            print("[Joystick] Handler registered successfully.")
-        else:
-            print("[Joystick] Not available (using mock or hardware not detected).")
-
+        
         # Set initial mode
-        self.set_sense_mode_by_name(self.MODES[self.mode_index])
-
+        self.set_sense_mode(self.MODES[self.mode_index])
+        
         while True:
             now = time.time()
             try:
                 self.maybe_poll_motion()
 
-                # Periodic posture check (only if camera available)
-                if self.camera is not None and (now - self._last_posture_check) > POSTURE_INTERVAL:
+                # Periodic posture check
+                if (now - self._last_posture_check) > POSTURE_INTERVAL:
                     self._last_posture_check = now
                     print("Running periodic posture check...")
                     # Run in a thread to avoid blocking the loop
                     threading.Thread(target=self.run_posture_once, daemon=True).start()
 
-            except Exception as loop_error:
-                print(f"Error in background loop: {loop_error}")
+            except Exception as e:
+                print(f"Error in background loop: {e}")
                 traceback.print_exc()
-
+            
             time.sleep(15)
+
+# --- FastAPI Setup ---
+app = FastAPI(title="pi_productivity Web UI")
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # --- Global Instance (created at startup to avoid hardware init during import) ---
 sense = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global sense
-    # Startup
-    print(f"Database is located at: {BASE_DIR / 'data' / 'tasks.db'}")
-    print(f"Log files are located in: {LOG_DIR}")
-    print("Initializing hardware...")
-    
-    # Initialize the PiProductivity instance
-    sense = PiProductivity()
-    
-    # Start background hardware loop in a thread
-    thread = threading.Thread(target=sense.run_forever, daemon=True)
-    thread.start()
-    
-    # Start WebSocket broadcaster
-    asyncio.create_task(broadcast_loop())
-    
-    print("Starting FastAPI server...")
-    
-    yield
-    
-    # Shutdown (if needed)
-    pass
-
-# --- FastAPI Setup ---
-app = FastAPI(lifespan=lifespan)
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # 1. Define the Broadcaster class
 class Broadcaster:
@@ -459,15 +411,15 @@ def get_sense_readings():
             "pressure": round(sense_mode.sense.get_pressure(), 1),
             "available": not isinstance(sense_mode.sense, sense_mode.MockSenseHat),
         }
-    except Exception:
-        return {"available": False, "error": "Sense HAT unavailable"}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
 
 def build_status_payload() -> dict:
     return {
-        "mode": getattr(sense, "active_mode_name", "none") if sense is not None else "none",
+        "mode": sense.active_mode_name,
         "sense": get_sense_readings(),
-        "tasks": sense.db.fetch_items_for_display(limit=20) if sense is not None else [],
-        "timestamp": datetime.now(timezone.utc).isoformat(),  # Changed from utcnow()
+        "tasks": sense.db.fetch_items_for_display(limit=20),
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 # --- Web Application Endpoints ---
@@ -475,32 +427,21 @@ def build_status_payload() -> dict:
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "sense_modes": list(sense.sense_modes.keys()) if sense is not None else [],
-        "active_mode": sense.active_mode_name if sense is not None else "none"
+        "sense_modes": sense.sense_modes.keys(),
+        "active_mode": sense.active_mode_name
     })
 
 @app.post("/sense/mode", response_class=JSONResponse)
 async def set_sense_mode_endpoint(mode_name: str = Form(...)):
-    if sense is None:
-        return JSONResponse({"status": "error", "message": "Service unavailable"}, status_code=503)
-    new_mode = await run_in_threadpool(sense.set_sense_mode_by_name, mode_name)
+    new_mode = await run_in_threadpool(sense.set_sense_mode, mode_name)
     return JSONResponse({"status": "success", "mode": new_mode})
-
-@app.get("/api/status", response_class=JSONResponse)
-async def api_status():
-    if sense is None:
-        return JSONResponse({"error": "Service unavailable"}, status_code=503)
-    payload = await run_in_threadpool(build_status_payload)
-    return JSONResponse(payload)
 
 @app.post("/ocr", response_class=JSONResponse)
 async def run_ocr_endpoint():
-    if sense is None:
-        return JSONResponse({"status": "error", "message": "Service unavailable"}, status_code=503)
     try:
         img_path, txt_path, text = await run_in_threadpool(sense.run_ocr_once)
         return JSONResponse({"status": "success", "image_path": img_path, "text_path": txt_path, "text": text})
-    except Exception:
+    except Exception as e:
         # 1. (SEGURO) Loga o erro completo no seu terminal/console
         # Assim VOCÊ pode ver o que deu errado.
         print("--- ERRO NO ENDPOINT DE OCR ---")
@@ -513,27 +454,10 @@ async def run_ocr_endpoint():
             {"status": "error", "message": "Ocorreu um erro interno ao processar a imagem."}, 
             status_code=500
         )
-
-@app.post("/api/sync", response_class=JSONResponse)
-async def trigger_motion_sync():
-    if sense is None:
-        return JSONResponse({"status": "error", "message": "Service unavailable"}, status_code=503)
-    try:
-        await run_in_threadpool(sense.maybe_poll_motion)
-        return JSONResponse({"status": "success"})
-    except Exception as e:
-        print("--- ERRO NO SYNC MANUAL ---")
-        traceback.print_exc()
-        print("---------------------------")
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 @app.get("/camera.jpg")
 async def camera_jpeg():
-    if sense is None:
-        # Return empty bytes if sense is not initialized
-        data = b''
-    else:
-        frame = await run_in_threadpool(sense.read_jpeg)
-        data = frame or b'' # Return empty bytes if no frame
+    frame = await run_in_threadpool(sense.read_jpeg)
+    data = frame or b'' # Return empty bytes if no frame
     return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
 
 @app.get("/api/week-calendar", response_class=JSONResponse)
@@ -555,16 +479,46 @@ async def websocket_endpoint(ws: WebSocket):
 
 # --- FastAPI Lifecycle & Background Tasks ---
 async def broadcast_loop():
-    prev_payload = None
     while True:
         payload = await run_in_threadpool(build_status_payload)
-        if payload != prev_payload:
-            await bus.publish({"kind": "tick", "payload": payload})
-            prev_payload = payload
+        await bus.publish({"kind": "tick", "payload": payload})
         await asyncio.sleep(2)
+
+@app.on_event("startup")
+async def on_startup():
+    # Instantiate the main application object here so hardware initialization
+    # (camera, e-paper, GPIO) happens during FastAPI startup where failures
+    # can be handled without breaking module import.
+    global sense
+    if sense is None:
+        try:
+            sense = PiProductivity()
+        except Exception as e:
+            print(f"Warning: Failed to initialize PiProductivity at startup: {e}")
+            sense = None
+    if not POSTURE_CSV.exists():
+        if sense is not None:
+            sense.log_event(POSTURE_CSV, ["timestamp", "ok", "reason", "tilt_deg", "nod_deg", "session_adjustments", "tasks_completed_today"], {"timestamp": datetime.now().isoformat(), "ok": True, "reason": "startup", "tilt_deg": 0, "nod_deg": 0, "session_adjustments": 0, "tasks_completed_today": 0})
+    if not TASK_CSV.exists():
+        if sense is not None:
+            sense.log_task_event("create", "Setup project")
+
+    # If sense init failed, don't start background hardware loop or broadcast.
+    if sense is None:
+        print("Warning: PiProductivity failed to initialize. Hardware features will be disabled.")
+        print(f"Log files are located in: {LOG_DIR}")
+        print("Starting FastAPI server without hardware integrations...")
+        return
+
+    thread = threading.Thread(target=sense.run_forever, daemon=True)
+    thread.start()
+
+    asyncio.create_task(broadcast_loop())
+
+    print(f"Database is located at: {sense.db.path}")
+    print(f"Log files are located in: {LOG_DIR}")
+    print("Starting FastAPI server...")
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    # Make sure to set the PI_PRODUCTIVITY_DIR environment variable
-    # example: export PI_PRODUCTIVITY_DIR=/path/to/your/project
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

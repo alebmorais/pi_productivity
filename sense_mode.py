@@ -5,7 +5,17 @@ class MockSenseHat:
     def __init__(self):
         self.low_light = False
         self.pixels = [[0,0,0]] * 64
-        self.stick = None  # Mock joystick
+        self.stick = None
+        self.stick = None
+
+    def get_temperature(self):
+        return 22.5
+    
+    def get_humidity(self):
+        return 45.0
+    
+    def get_pressure(self):
+        return 1013.0
 
     def get_temperature(self):
         return 22.5
@@ -28,8 +38,7 @@ class MockSenseHat:
         print(f"[MockSenseHat] Cleared display with color {color}.")
 
     def show_letter(self, letter, text_colour=None, back_colour=None):
-        colors = f"text={text_colour}, back={back_colour}" if text_colour or back_colour else ""
-        print(f"[MockSenseHat] Displayed letter '{letter}' {colors}".strip())
+        print(f"[MockSenseHat] Displayed letter '{letter}'.")
 
 try:
     from sense_hat import SenseHat
