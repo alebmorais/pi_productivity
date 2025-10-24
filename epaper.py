@@ -14,6 +14,10 @@ except Exception as e:  # Broad catch: ImportError, RuntimeError, lgpio.error, e
     EPD_AVAILABLE = False
     print(f"Warning: waveshare_epd import failed or unavailable: {e}")
 
+# The import above already handles missing waveshare_epd, so no need to try again here.
+if not EPD_AVAILABLE:
+    epd1in54_V2 = None  # Explicitly set to None if import fails
+
 class EPD:
     """A wrapper for the e-paper display, with a mock for non-Pi development."""
 
@@ -22,9 +26,21 @@ class EPD:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         if EPD_AVAILABLE:
-            self.epd = epd1in54_V2.EPD()
-            self.width = self.epd.width
-            self.height = self.epd.height
+            try:
+                if epd1in54_V2 is not None:
+                    self.epd = epd1in54_V2.EPD()
+                    self.width = self.epd.width
+                    self.height = self.epd.height
+                else:
+                    self.epd = None
+                    self.width = 200
+                    self.height = 200
+                    print("Warning: epd1in54_V2 is None. E-Paper display not initialized.")
+            except Exception as e:
+                self.epd = None
+                self.width = 200
+                self.height = 200
+                print(f"Warning: Failed to initialize epd1in54_V2.EPD(): {e}")
         else:
             self.epd = None
             self.width = 200

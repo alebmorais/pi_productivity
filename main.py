@@ -101,8 +101,8 @@ class PiProductivity:
             time.sleep(1)  # Allow camera to warm up
             print("Camera initialized.")
             return cam
-        except Exception as e:
-            print(f"Error initializing camera: {e}")
+        except Exception:
+            print("Error initializing camera.")
             traceback.print_exc()
             return None
 
@@ -117,13 +117,13 @@ class PiProductivity:
 
     def set_sense_mode_by_name(self, mode_name: str):
         """Sets the Sense HAT mode by its name."""
-        return self.set_sense_mode(mode_name)
+        return self._set_sense_mode(mode_name)
 
     def set_sense_mode_by_index(self, mode_index: int):
         """Sets the Sense HAT mode by its index in the MODES list."""
         if 0 <= mode_index < len(self.MODES):
             mode_name = self.MODES[mode_index]
-            return self.set_sense_mode(mode_name)
+            return self._set_sense_mode(mode_name)
         return "none"
 
     # --- Logging ---
@@ -281,7 +281,7 @@ class PiProductivity:
         # ... (epaper rendering logic) ...
         pass
 
-    def set_sense_mode(self, mode_name: str):
+    def _set_sense_mode(self, mode_name: str):
         """Stops the current mode, sets the new one, and provides feedback."""
         self.stop_current_mode()
         self.active_mode_name = mode_name
@@ -325,11 +325,17 @@ class PiProductivity:
             print(f"Joystick middle press detected. Action for mode: {current_mode_name}")
             if "posture" in current_mode_name:
                 sense_mode.sense.clear([255, 255, 0]) # Yellow flash
-                asyncio.create_task(run_in_threadpool(self.run_posture_once))
+                loop = asyncio.get_event_loop()
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(run_in_threadpool(self.run_posture_once))
+                )
                 print("Triggered posture check from joystick.")
             elif "ocr" in current_mode_name:
                 sense_mode.sense.clear([255, 255, 0]) # Yellow flash
-                asyncio.create_task(run_in_threadpool(self.run_ocr_once))
+                loop = asyncio.get_event_loop()
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(run_in_threadpool(self.run_ocr_once))
+                )
                 print("Triggered OCR from joystick.")
             return
 

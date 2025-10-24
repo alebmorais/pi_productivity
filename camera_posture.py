@@ -13,6 +13,7 @@ class PostureMonitor:
         face_cascade_filename = "haarcascade_frontalface_default.xml"
         eye_cascade_filename = "haarcascade_eye.xml"
         
+        import cv2.data  # Explicitly import cv2.data to ensure haarcascades path is available
         candidates = [
             os.path.join(cv2.data.haarcascades, face_cascade_filename),
             f"/usr/share/opencv4/haarcascades/{face_cascade_filename}",
@@ -23,7 +24,7 @@ class PostureMonitor:
             raise FileNotFoundError(f"Não encontrei {face_cascade_filename}")
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
 
-        # Cascade para olhos
+        import cv2.data  # Explicitly import cv2.data to ensure haarcascades path is available
         eye_cascade_candidates = [
             os.path.join(cv2.data.haarcascades, eye_cascade_filename),
             f"/usr/share/opencv4/haarcascades/{eye_cascade_filename}",
