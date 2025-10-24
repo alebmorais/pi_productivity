@@ -1,20 +1,17 @@
 import os
 import csv
-import uuid
 import io
 import threading
 import asyncio
-import json
 import time
 import traceback
-import logging # O logging é ainda melhor, mas traceback é o que o exemplo usa
-from datetime import datetime
-from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -206,8 +203,9 @@ class PiProductivity:
         if MOTION_ENABLE_OCR and self.motion_client and text:
             try:
                 self._ocr_apply_to_motion(text)
-            except Exception as e:
-                print(f"[OCR->Motion] Error: {e}")
+            except Exception as ocr_error:  # Renamed from 'e'
+                print(f"[OCR->Motion] Error: {ocr_error}")
+                traceback.print_exc()  # Add this if you want to see the full traceback
 
         sense_mode.sense.show_letter("T", back_colour=sense_mode.BLUE)
         time.sleep(1)
@@ -215,9 +213,10 @@ class PiProductivity:
         return img_path, txt_path, text
 
     def _ocr_apply_to_motion(self, text):
+        """Apply OCR text to Motion service."""
         # (This logic remains complex and specific, keeping it encapsulated)
         # ... (previous _ocr_parse_actions and _iso_from_due_hint logic can be moved here or kept as helpers)
-        pass # Placeholder for the detailed parsing and API calls
+        pass  # Placeholder for the detailed parsing and API calls
 
     def maybe_poll_motion(self):
         if not self.motion_client or not self.motion_client.api_key:
@@ -239,8 +238,9 @@ class PiProductivity:
                 self.epaper_display.render_list(items, title="Pending Tasks")
                 print("[E-Paper] Display updated with latest tasks.")
 
-        except Exception as e:
-            print(f"[Motion Sync] Error: {e}")
+        except Exception as sync_error:
+            print(f"[Motion Sync] Error: {sync_error}")
+            traceback.print_exc()
 
     # --- UI and Hardware Interaction ---
     def _render_mode_banner(self):
@@ -345,15 +345,18 @@ class PiProductivity:
         # Ensure joystick handler is set
         if hasattr(sense_mode.sense, 'stick'):
             sense_mode.sense.stick.direction_any = self.handle_joystick
-        
-    # Set initial mode
-    # Use the public by-name setter to initialize mode
-    self.set_sense_mode_by_name(self.MODES[self.mode_index])
-    
-    while True:
-        now = time.time()
-        try:
-            self.maybe_poll_motion()
+
+        # Set initial mode
+        # Use the public by-name setter to initialize mode
+        self.set_sense_mode_by_name(self.MODES[self.mode_index])
+
+        # The above line should only be inside the class, not here.
+        # Instead, set the initial mode in the __init__ or after creating the instance.
+
+        while True:
+            now = time.time()
+            try:
+                self.maybe_poll_motion()
 
                 # Periodic posture check
                 if (now - self._last_posture_check) > POSTURE_INTERVAL:
@@ -362,16 +365,30 @@ class PiProductivity:
                     # Run in a thread to avoid blocking the loop
                     threading.Thread(target=self.run_posture_once, daemon=True).start()
 
-            except Exception as e:
-                print(f"Error in background loop: {e}")
+            except Exception as loop_error:
+                print(f"Error in background loop: {loop_error}")
                 traceback.print_exc()
-            
+
             time.sleep(15)
 
 # --- FastAPI Setup ---
-app = FastAPI(title="pi_productivity Web UI")
+app = FastAPI(lifespan=None)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    print(f"Log files are located in: {LOG_DIR}")
+    print("Starting FastAPI server...")
+    asyncio.create_task(broadcast_loop())
+    
+    yield
+    
+    # Shutdown (if needed)
+    pass
+
+app = FastAPI(lifespan=lifespan)
 
 # --- Global Instance (created at startup to avoid hardware init during import) ---
 sense = None
@@ -414,15 +431,15 @@ def get_sense_readings():
             "pressure": round(sense_mode.sense.get_pressure(), 1),
             "available": not isinstance(sense_mode.sense, sense_mode.MockSenseHat),
         }
-    except Exception as e:
-        return {"available": False, "error": str(e)}
+    except Exception:
+        return {"available": False, "error": "Sense HAT unavailable"}
 
 def build_status_payload() -> dict:
     return {
         "mode": getattr(sense, "active_mode_name", "none") if sense is not None else "none",
         "sense": get_sense_readings(),
         "tasks": sense.db.fetch_items_for_display(limit=20) if sense is not None else [],
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),  # Changed from utcnow()
     }
 
 # --- Web Application Endpoints ---
@@ -438,7 +455,7 @@ async def read_root(request: Request):
 async def set_sense_mode_endpoint(mode_name: str = Form(...)):
     if sense is None:
         return JSONResponse({"status": "error", "message": "Service unavailable"}, status_code=503)
-    new_mode = await run_in_threadpool(sense.set_sense_mode, mode_name)
+    new_mode = await run_in_threadpool(sense.set_sense_mode_by_name, mode_name)
     return JSONResponse({"status": "success", "mode": new_mode})
 
 @app.post("/ocr", response_class=JSONResponse)
@@ -448,7 +465,7 @@ async def run_ocr_endpoint():
     try:
         img_path, txt_path, text = await run_in_threadpool(sense.run_ocr_once)
         return JSONResponse({"status": "success", "image_path": img_path, "text_path": txt_path, "text": text})
-    except Exception as e:
+    except Exception:
         # 1. (SEGURO) Loga o erro completo no seu terminal/console
         # Assim VOCÊ pode ver o que deu errado.
         print("--- ERRO NO ENDPOINT DE OCR ---")
@@ -490,46 +507,19 @@ async def websocket_endpoint(ws: WebSocket):
 
 # --- FastAPI Lifecycle & Background Tasks ---
 async def broadcast_loop():
+    prev_payload = None
     while True:
         payload = await run_in_threadpool(build_status_payload)
-        await bus.publish({"kind": "tick", "payload": payload})
+        if payload != prev_payload:
+            await bus.publish({"kind": "tick", "payload": payload})
+            prev_payload = payload
         await asyncio.sleep(2)
 
-@app.on_event("startup")
-async def on_startup():
-    # Instantiate the main application object here so hardware initialization
-    # (camera, e-paper, GPIO) happens during FastAPI startup where failures
-    # can be handled without breaking module import.
-    global sense
-    if sense is None:
-        try:
-            sense = PiProductivity()
-        except Exception as e:
-            print(f"Warning: Failed to initialize PiProductivity at startup: {e}")
-            sense = None
-    if not POSTURE_CSV.exists():
-        if sense is not None:
-            sense.log_event(POSTURE_CSV, ["timestamp", "ok", "reason", "tilt_deg", "nod_deg", "session_adjustments", "tasks_completed_today"], {"timestamp": datetime.now().isoformat(), "ok": True, "reason": "startup", "tilt_deg": 0, "nod_deg": 0, "session_adjustments": 0, "tasks_completed_today": 0})
-    if not TASK_CSV.exists():
-        if sense is not None:
-            sense.log_task_event("create", "Setup project")
-
-    # If sense init failed, don't start background hardware loop or broadcast.
-    if sense is None:
-        print("Warning: PiProductivity failed to initialize. Hardware features will be disabled.")
-        print(f"Log files are located in: {LOG_DIR}")
-        print("Starting FastAPI server without hardware integrations...")
-        return
-
-    thread = threading.Thread(target=sense.run_forever, daemon=True)
-    thread.start()
-
-    asyncio.create_task(broadcast_loop())
-
-    print(f"Database is located at: {sense.db.path}")
-    print(f"Log files are located in: {LOG_DIR}")
-    print("Starting FastAPI server...")
-
 # --- Main Execution ---
-if __name__ == "__main__":
+def main():
+    global sense
+    sense = PiProductivity()
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+if __name__ == "__main__":
+    main()
