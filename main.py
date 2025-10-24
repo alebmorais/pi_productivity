@@ -196,7 +196,7 @@ class PiProductivity:
             self.posture_adjust_count += 1
             sense_mode.sense.show_letter("!", back_colour=sense_mode.RED)
         else:
-            sense_mode.sense.show_letter("OK", back_colour=sense_mode.GREEN)
+            sense_mode.sense.show_letter("✓", back_colour=sense_mode.GREEN)
         time.sleep(1)
         self._render_mode_banner()
         return status
