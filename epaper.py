@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
@@ -12,11 +11,10 @@ try:
     EPD_AVAILABLE = True
 except Exception as e:  # Broad catch: ImportError, RuntimeError, lgpio.error, etc.
     EPD_AVAILABLE = False
+    epd1in54_V2 = None  # Explicitly set to None if import fails
     print(f"Warning: waveshare_epd import failed or unavailable: {e}")
 
 # The import above already handles missing waveshare_epd, so no need to try again here.
-if not EPD_AVAILABLE:
-    epd1in54_V2 = None  # Explicitly set to None if import fails
 
 class EPD:
     """A wrapper for the e-paper display, with a mock for non-Pi development."""
