@@ -316,7 +316,8 @@ class PiProductivity:
             self.mode_index = (self.mode_index + delta) % len(self.MODES)
             new_mode_name = self.MODES[self.mode_index]
             print(f"Joystick changing mode to: {new_mode_name}")
-            self.set_sense_mode(new_mode_name)
+            # Use the public by-name setter to switch modes
+            self.set_sense_mode_by_name(new_mode_name)
             return
 
         # Middle button triggers the action for the CURRENT mode
@@ -345,13 +346,14 @@ class PiProductivity:
         if hasattr(sense_mode.sense, 'stick'):
             sense_mode.sense.stick.direction_any = self.handle_joystick
         
-        # Set initial mode
-        self.set_sense_mode(self.MODES[self.mode_index])
-        
-        while True:
-            now = time.time()
-            try:
-                self.maybe_poll_motion()
+    # Set initial mode
+    # Use the public by-name setter to initialize mode
+    self.set_sense_mode_by_name(self.MODES[self.mode_index])
+    
+    while True:
+        now = time.time()
+        try:
+            self.maybe_poll_motion()
 
                 # Periodic posture check
                 if (now - self._last_posture_check) > POSTURE_INTERVAL:
