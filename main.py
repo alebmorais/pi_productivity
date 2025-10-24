@@ -371,27 +371,38 @@ class PiProductivity:
 
             time.sleep(15)
 
-# --- FastAPI Setup ---
-app = FastAPI(lifespan=None)
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# --- Global Instance (created at startup to avoid hardware init during import) ---
+sense = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global sense
     # Startup
+    print(f"Database is located at: {BASE_DIR / 'data' / 'tasks.db'}")
     print(f"Log files are located in: {LOG_DIR}")
-    print("Starting FastAPI server...")
+    print("Initializing hardware...")
+    
+    # Initialize the PiProductivity instance
+    sense = PiProductivity()
+    
+    # Start background hardware loop in a thread
+    thread = threading.Thread(target=sense.run_forever, daemon=True)
+    thread.start()
+    
+    # Start WebSocket broadcaster
     asyncio.create_task(broadcast_loop())
+    
+    print("Starting FastAPI server...")
     
     yield
     
     # Shutdown (if needed)
     pass
 
+# --- FastAPI Setup ---
 app = FastAPI(lifespan=lifespan)
-
-# --- Global Instance (created at startup to avoid hardware init during import) ---
-sense = None
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # 1. Define the Broadcaster class
 class Broadcaster:
@@ -458,6 +469,13 @@ async def set_sense_mode_endpoint(mode_name: str = Form(...)):
     new_mode = await run_in_threadpool(sense.set_sense_mode_by_name, mode_name)
     return JSONResponse({"status": "success", "mode": new_mode})
 
+@app.get("/api/status", response_class=JSONResponse)
+async def api_status():
+    if sense is None:
+        return JSONResponse({"error": "Service unavailable"}, status_code=503)
+    payload = await run_in_threadpool(build_status_payload)
+    return JSONResponse(payload)
+
 @app.post("/ocr", response_class=JSONResponse)
 async def run_ocr_endpoint():
     if sense is None:
@@ -516,10 +534,7 @@ async def broadcast_loop():
         await asyncio.sleep(2)
 
 # --- Main Execution ---
-def main():
-    global sense
-    sense = PiProductivity()
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
 if __name__ == "__main__":
-    main()
+    # Make sure to set the PI_PRODUCTIVITY_DIR environment variable
+    # example: export PI_PRODUCTIVITY_DIR=/path/to/your/project
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
