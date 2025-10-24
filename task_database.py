@@ -14,6 +14,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Mapping, Sequence
+from collections import defaultdict
 
 from utils import normalize_and_format_date, today_local
 
@@ -56,6 +57,12 @@ class TaskDatabase:
                     updated_at TEXT NOT NULL
                 )
                 """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)"
             )
 
     # ------------------------------------------------------------------
@@ -187,7 +194,6 @@ class TaskDatabase:
 
         today = today_local()
         week_start, week_end = self._get_week_range(today)
-        
         try:
             with self._connect() as conn:
                 rows = conn.execute(
@@ -196,8 +202,8 @@ class TaskDatabase:
                     FROM tasks
                     WHERE COALESCE(LOWER(status), 'pending') NOT IN ('completed', 'done', 'cancelled', 'canceled', 'archived')
                       AND due_date IS NOT NULL
-                      AND due_date >= ?
-                      AND due_date <= ?
+                      AND DATE(due_date) >= ?
+                      AND DATE(due_date) <= ?
                     ORDER BY
                         due_date ASC,
                         updated_at DESC
@@ -233,6 +239,7 @@ class TaskDatabase:
                 subtitle = f"{subtitle} [{tag}]".strip()
             items.append(
                 {
+                    "task_id": row["task_id"],
                     "title": row["title"],
                     "subtitle": subtitle,
                     "right": due_display,
@@ -265,59 +272,49 @@ class TaskDatabase:
             return f"{dt.strftime('%a')}"
         return dt.strftime("%d/%m")
 
-    def fetch_week_calendar(self) -> dict:
-        """Return tasks grouped by day of the week for calendar view.
-        
-        Returns a dict with structure:
-        {
-            "week_start": "2025-10-21",
-            "week_end": "2025-10-27",
-            "days": [
-                {
-                    "date": "2025-10-21",
-                    "day_name": "Seg",
-                    "day_number": 21,
-                    "is_today": False,
-                    "tasks": [...]
-                },
-                ...
-            ]
-        }
+    def fetch_week_calendar(self, limit: int = 100) -> dict:
+        """
+        Return tasks grouped by day of the week for calendar view.
+
+        The week always starts on Monday and ends on Sunday, matching the boundaries used by _get_week_range.
+
+        The returned dictionary contains a list of days, each with its date, day name, day number, a flag indicating if it is today,
+        and the list of tasks for that day. Tasks are grouped by day, and each day includes its name and number.
+
+        If a database error occurs (e.g., sqlite3.Error), the returned dictionary will include an "error" field
+        describing the exception.
+
+        The maximum number of tasks returned for the week can be controlled via the 'limit' parameter.
         """
         today = today_local()
         week_start, week_end = self._get_week_range(today)
         
-        # Get all tasks for the week
         try:
             with self._connect() as conn:
                 rows = conn.execute(
-                    """
-                    SELECT task_id, title, subtitle, due_date, status, raw
-                    FROM tasks
-                    WHERE COALESCE(LOWER(status), 'pending') NOT IN ('completed', 'done', 'cancelled', 'canceled', 'archived')
-                      AND due_date IS NOT NULL
-                      AND due_date >= ?
-                      AND due_date <= ?
-                    ORDER BY due_date ASC, updated_at DESC
-                    """,
-                    (week_start, week_end),
+                """
+                SELECT task_id, title, subtitle, due_date, status, raw
+                FROM tasks
+                WHERE COALESCE(LOWER(status), 'pending') NOT IN ('completed', 'done', 'cancelled', 'canceled', 'archived')
+                  AND due_date IS NOT NULL
+                  AND DATE(due_date) >= ?
+                  AND DATE(due_date) <= ?
+                ORDER BY due_date ASC, updated_at DESC
+                LIMIT ?
+                """,
+                (week_start, week_end, limit),
                 ).fetchall()
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
             return {
                 "week_start": week_start,
                 "week_end": week_end,
-                "days": []
+                "days": [],
+                "error": str(exc)
             }
         
-        # Group tasks by date
-        tasks_by_date = {}
+        tasks_by_date = defaultdict(list)
         for row in rows:
-            due_date = row["due_date"][:10] if row["due_date"] else None
-            if not due_date:
-                continue
-            if due_date not in tasks_by_date:
-                tasks_by_date[due_date] = []
-            
+            due_date = row["due_date"][:10]
             tasks_by_date[due_date].append({
                 "task_id": row["task_id"],
                 "title": row["title"],
@@ -325,11 +322,9 @@ class TaskDatabase:
                 "status": row["status"] or "pending"
             })
         
-        # Build calendar structure
-        days = []
-        start_date = datetime.fromisoformat(week_start).date()
+        start_date = date.fromisoformat(week_start)
         day_names = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
-        
+        days = []
         for i in range(7):
             current_date = start_date + timedelta(days=i)
             date_str = current_date.isoformat()
