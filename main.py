@@ -131,6 +131,17 @@ class PiProductivity:
 
         return self.active_mode_name
 
+    def set_sense_mode_by_name(self, mode_name: str):
+        """Sets the Sense HAT mode by its name."""
+        return self.set_sense_mode(mode_name)
+
+    def set_sense_mode_by_index(self, mode_index: int):
+        """Sets the Sense HAT mode by its index in the MODES list."""
+        if 0 <= mode_index < len(self.MODES):
+            mode_name = self.MODES[mode_index]
+            return self.set_sense_mode(mode_name)
+        return "none"
+
     # --- Logging ---
     def log_event(self, file_path, fieldnames, event_data):
         file_exists = os.path.isfile(file_path)
