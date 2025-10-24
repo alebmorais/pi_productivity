@@ -84,6 +84,9 @@ class PiProductivity:
         self._last_posture_check = 0
         self.posture_adjust_count = 0
         self.tasks_completed_today = 0
+        
+    # Threads
+    self._joy_thread = None
 
     def _init_camera(self):
         if not Picamera2:
@@ -325,26 +328,63 @@ class PiProductivity:
             current_mode_name = self.active_mode_name
             print(f"Joystick middle press detected. Action for mode: {current_mode_name}")
             if "posture" in current_mode_name:
-                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
-                loop = asyncio.get_event_loop()
-                loop.call_soon_threadsafe(
-                    lambda: asyncio.ensure_future(run_in_threadpool(self.run_posture_once))
-                )
-                print("Triggered posture check from joystick.")
+                sense_mode.sense.clear([255, 255, 0])  # Yellow flash
+                # Run posture in a short-lived background thread to avoid event-loop issues
+                threading.Thread(target=self._safe_run_posture_once, daemon=True).start()
+                print("Triggered posture check from joystick (thread).")
             elif "ocr" in current_mode_name:
-                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
-                loop = asyncio.get_event_loop()
-                loop.call_soon_threadsafe(
-                    lambda: asyncio.ensure_future(run_in_threadpool(self.run_ocr_once))
-                )
-                print("Triggered OCR from joystick.")
+                sense_mode.sense.clear([255, 255, 0])  # Yellow flash
+                threading.Thread(target=self._safe_run_ocr_once, daemon=True).start()
+                print("Triggered OCR from joystick (thread).")
             return
+
+    def _safe_run_posture_once(self):
+        try:
+            self.run_posture_once()
+        except Exception:
+            print("[Joystick] Error running posture check:")
+            traceback.print_exc()
+
+    def _safe_run_ocr_once(self):
+        try:
+            self.run_ocr_once()
+        except Exception:
+            print("[Joystick] Error running OCR capture:")
+            traceback.print_exc()
 
     def run_forever(self):
         print("Starting background hardware loop...")
         # Ensure joystick handler is set
         if hasattr(sense_mode.sense, 'stick'):
-            sense_mode.sense.stick.direction_any = self.handle_joystick
+            # Try both callback- and polling-based strategies for reliability
+            try:
+                sense_mode.sense.stick.direction_any = self.handle_joystick
+                print("[Joystick] direction_any callback registered.")
+            except Exception:
+                print("[Joystick] Failed to register direction_any callback; will poll events.")
+
+            # Start a polling loop to catch events reliably across Sense HAT versions
+            if hasattr(sense_mode.sense.stick, 'get_events'):
+                def _poll_loop():
+                    print("[Joystick] Polling thread started.")
+                    while True:
+                        try:
+                            for ev in sense_mode.sense.stick.get_events():
+                                # Normalize event.action to string "pressed"/"released" if constants are provided
+                                if hasattr(ev, 'action') and isinstance(ev.action, str):
+                                    pass  # already a string
+                                elif hasattr(ev, 'action'):
+                                    try:
+                                        ev.action = str(ev.action)
+                                    except Exception:
+                                        pass
+                                self.handle_joystick(ev)
+                        except Exception:
+                            print("[Joystick] Error while polling events:")
+                            traceback.print_exc()
+                        time.sleep(0.05)
+                self._joy_thread = threading.Thread(target=_poll_loop, daemon=True)
+                self._joy_thread.start()
 
         # Set initial mode
         # Use the public by-name setter to initialize mode

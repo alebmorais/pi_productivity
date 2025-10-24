@@ -256,3 +256,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(loadCalendar, 30000); // Refresh calendar every 30 seconds
     initWS();
 });
+# Python
+app = FastAPI()
+app.state.sense = PiProductivity()
+
+@app.get("/status")
+def status(request: Request):
+    sense = request.app.state.sense
+    return {"mode": sense.MODES[sense.mode_index]}
