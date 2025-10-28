@@ -6,17 +6,26 @@ import threading
 import asyncio
 import json
 import time
-import traceback
-import logging # O logging é ainda melhor, mas traceback é o que o exemplo usa
+import logging
 from datetime import datetime
 from contextlib import suppress
 from pathlib import Path
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    Request,
+    Form,
+    WebSocket,
+    WebSocketDisconnect,
+    Depends,
+    HTTPException,
+    status,
+)
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import APIKeyHeader
 from starlette.concurrency import run_in_threadpool
 import uvicorn
 
@@ -35,6 +44,15 @@ LOG_DIR = BASE_DIR / "logs"
 STATIC_DIR = Path(__file__).parent / "static"
 os.makedirs(LOG_DIR, exist_ok=True)
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_DIR / "app.log"),
+        logging.StreamHandler(),
+    ],
+)
+
 # --- Constants and Settings ---
 POSTURE_CSV = LOG_DIR / "posture_events.csv"
 TASK_CSV = LOG_DIR / "task_events.csv"
@@ -46,6 +64,19 @@ OCR_DEFAULT_DUE_DAYS = int(os.getenv("OCR_DEFAULT_DUE_DAYS", "2"))
 MOTION_SYNC_INTERVAL = int(os.getenv("MOTION_SYNC_INTERVAL", "900"))
 POSTURE_INTERVAL = int(os.getenv("POSTURE_INTERVAL", "300"))
 OCR_INTERVAL = int(os.getenv("OCR_INTERVAL", "600"))
+API_KEY = os.getenv("API_KEY")
+
+api_key_header = APIKeyHeader(name="X-API-Key")
+
+
+async def get_api_key(api_key: str = Depends(api_key_header)):
+    if not API_KEY or api_key != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key",
+        )
+    return api_key
+
 
 try:
     import cv2
@@ -90,7 +121,7 @@ class PiProductivity:
 
     def _init_camera(self):
         if not Picamera2:
-            print("Warning: Picamera2 not found. Camera functionality disabled.")
+            logging.warning("Picamera2 not found. Camera functionality disabled.")
             return None
         try:
             cam = Picamera2()
@@ -99,37 +130,20 @@ class PiProductivity:
             cam.configure(config)
             cam.start()
             time.sleep(1)  # Allow camera to warm up
-            print("Camera initialized.")
+            logging.info("Camera initialized.")
             return cam
         except Exception as e:
-            print(f"Error initializing camera: {e}")
-            traceback.print_exc()
+            logging.error(f"Error initializing camera: {e}", exc_info=True)
             return None
 
     # --- Mode Management ---
     def stop_current_mode(self):
         if self.active_mode and self.active_mode.is_running():
             self.active_mode.stop()
-            print(f"Stopped Sense HAT mode: {self.active_mode_name}")
+            logging.info(f"Stopped Sense HAT mode: {self.active_mode_name}")
         self.active_mode = None
         self.active_mode_name = "none"
 
-    def set_sense_mode(self, mode_name: str):
-        self.stop_current_mode()
-        
-        if mode_name in self.sense_modes:
-            self.active_mode = self.sense_modes[mode_name]
-            self.active_mode.start()
-            self.active_mode_name = mode_name
-            print(f"Started Sense HAT mode: {mode_name}")
-            # Timer-based modes control their own display, so we don't call the banner.
-        else:
-            # For non-timer modes, we set the name and show the banner.
-            self.active_mode_name = mode_name
-            print(f"Set passive Sense HAT mode: {mode_name}")
-            self._render_mode_banner()
-
-        return self.active_mode_name
 
     # --- Logging ---
     def log_event(self, file_path, fieldnames, event_data):
@@ -149,7 +163,7 @@ class PiProductivity:
             "section_title": section_title,
         }
         self.log_event(TASK_CSV, fieldnames, event)
-        print(f"Logged task event: action={action}, task={task_name}")
+        logging.info(f"Logged task event: action={action}, task={task_name}")
 
     def _log_posture_csv(self, status):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -212,7 +226,7 @@ class PiProductivity:
             try:
                 self._ocr_apply_to_motion(text)
             except Exception as e:
-                print(f"[OCR->Motion] Error: {e}")
+                logging.error(f"[OCR->Motion] Error: {e}", exc_info=True)
 
         sense_mode.sense.show_letter("T", back_colour=sense_mode.BLUE)
         time.sleep(1)
@@ -234,24 +248,24 @@ class PiProductivity:
 
         self._last_motion_sync = now
         try:
-            print("[Motion] Starting task sync...")
+            logging.info("[Motion] Starting task sync...")
             tasks = self.motion_client.list_all_tasks_simple()
             synced = self.db.upsert_motion_tasks(tasks)
-            print(f"[Motion] Synced {synced} tasks.")
-            
+            logging.info(f"[Motion] Synced {synced} tasks.")
+
             if self.epaper_display:
                 items = self.db.fetch_items_for_display()
                 self.epaper_display.render_list(items, title="Pending Tasks")
-                print("[E-Paper] Display updated with latest tasks.")
+                logging.info("[E-Paper] Display updated with latest tasks.")
 
         except Exception as e:
-            print(f"[Motion Sync] Error: {e}")
+            logging.error(f"[Motion Sync] Error: {e}", exc_info=True)
 
     # --- UI and Hardware Interaction ---
     def _render_mode_banner(self):
         """Provides immediate visual feedback on the Sense HAT for the current mode."""
         name = self.active_mode_name
-        print(f"[Sense] Displaying banner for mode: {name}")
+        logging.info(f"[Sense] Displaying banner for mode: {name}")
 
         color = sense_mode.BLUE
         letter = "?"
@@ -300,9 +314,9 @@ class PiProductivity:
         if mode_name in self.sense_modes:
             self.active_mode = self.sense_modes[mode_name]
             self.active_mode.start()
-            print(f"Started active Sense HAT mode: {mode_name}")
+            logging.info(f"Started active Sense HAT mode: {mode_name}")
         else:
-            print(f"Set passive Sense HAT mode: {mode_name}")
+            logging.info(f"Set passive Sense HAT mode: {mode_name}")
 
         return self.active_mode_name
 
@@ -320,28 +334,30 @@ class PiProductivity:
         if delta != 0:
             self.mode_index = (self.mode_index + delta) % len(self.MODES)
             new_mode_name = self.MODES[self.mode_index]
-            print(f"Joystick changing mode to: {new_mode_name}")
+            logging.info(f"Joystick changing mode to: {new_mode_name}")
             self.set_sense_mode(new_mode_name)
             return
 
         # Middle button triggers the action for the CURRENT mode
         if event.direction == "middle":
             current_mode_name = self.active_mode_name
-            print(f"Joystick middle press detected. Action for mode: {current_mode_name}")
+            logging.info(
+                f"Joystick middle press detected. Action for mode: {current_mode_name}"
+            )
             if "posture" in current_mode_name:
-                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
+                sense_mode.sense.clear([255, 255, 0])  # Yellow flash
                 run_in_threadpool(self.run_posture_once)
-                print("Triggered posture check from joystick.")
+                logging.info("Triggered posture check from joystick.")
             elif "ocr" in current_mode_name:
-                sense_mode.sense.clear([255, 255, 0]) # Yellow flash
+                sense_mode.sense.clear([255, 255, 0])  # Yellow flash
                 run_in_threadpool(self.run_ocr_once)
-                print("Triggered OCR from joystick.")
+                logging.info("Triggered OCR from joystick.")
             return
 
     def run_forever(self):
-        print("Starting background hardware loop...")
+        logging.info("Starting background hardware loop...")
         # Ensure joystick handler is set
-        if hasattr(sense_mode.sense, 'stick'):
+        if hasattr(sense_mode.sense, "stick"):
             sense_mode.sense.stick.direction_any = self.handle_joystick
         
         # Set initial mode
@@ -355,13 +371,12 @@ class PiProductivity:
                 # Periodic posture check
                 if (now - self._last_posture_check) > POSTURE_INTERVAL:
                     self._last_posture_check = now
-                    print("Running periodic posture check...")
+                    logging.info("Running periodic posture check...")
                     # Run in a thread to avoid blocking the loop
                     threading.Thread(target=self.run_posture_once, daemon=True).start()
 
             except Exception as e:
-                print(f"Error in background loop: {e}")
-                traceback.print_exc()
+                logging.error(f"Error in background loop: {e}", exc_info=True)
             
             time.sleep(15)
 
@@ -432,36 +447,34 @@ async def read_root(request: Request):
     })
 
 @app.post("/sense/mode", response_class=JSONResponse)
-async def set_sense_mode_endpoint(mode_name: str = Form(...)):
+async def set_sense_mode_endpoint(
+    mode_name: str = Form(...), api_key: str = Depends(get_api_key)
+):
     new_mode = await run_in_threadpool(sense.set_sense_mode, mode_name)
     return JSONResponse({"status": "success", "mode": new_mode})
 
 @app.post("/ocr", response_class=JSONResponse)
-async def run_ocr_endpoint():
+async def run_ocr_endpoint(api_key: str = Depends(get_api_key)):
     try:
         img_path, txt_path, text = await run_in_threadpool(sense.run_ocr_once)
         return JSONResponse({"status": "success", "image_path": img_path, "text_path": txt_path, "text": text})
     except Exception as e:
-        # 1. (SEGURO) Loga o erro completo no seu terminal/console
-        # Assim VOCÊ pode ver o que deu errado.
-        print("--- ERRO NO ENDPOINT DE OCR ---")
-        traceback.print_exc()
-        print("-------------------------------")
+        logging.error("Error in OCR endpoint", exc_info=True)
 
         # 2. (SEGURO) Envia uma mensagem genérica para o usuário
         # O usuário/invasor não vê nenhuma informação sensível.
         return JSONResponse(
-            {"status": "error", "message": "Ocorreu um erro interno ao processar a imagem."}, 
-            status_code=500
+            {"status": "error", "message": "Ocorreu um erro interno ao processar a imagem."},
+            status_code=500,
         )
 @app.get("/camera.jpg")
-async def camera_jpeg():
+async def camera_jpeg(api_key: str = Depends(get_api_key)):
     frame = await run_in_threadpool(sense.read_jpeg)
-    data = frame or b'' # Return empty bytes if no frame
+    data = frame or b''  # Return empty bytes if no frame
     return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
 
 @app.get("/api/week-calendar", response_class=JSONResponse)
-async def get_week_calendar():
+async def get_week_calendar(api_key: str = Depends(get_api_key)):
     """Return tasks grouped by day for the current week."""
     if sense is None:
         return JSONResponse({"error": "Service unavailable"}, status_code=503)
@@ -494,7 +507,9 @@ async def on_startup():
         try:
             sense = PiProductivity()
         except Exception as e:
-            print(f"Warning: Failed to initialize PiProductivity at startup: {e}")
+            logging.error(
+                f"Failed to initialize PiProductivity at startup: {e}", exc_info=True
+            )
             sense = None
     if not POSTURE_CSV.exists():
         if sense is not None:
@@ -505,9 +520,11 @@ async def on_startup():
 
     # If sense init failed, don't start background hardware loop or broadcast.
     if sense is None:
-        print("Warning: PiProductivity failed to initialize. Hardware features will be disabled.")
-        print(f"Log files are located in: {LOG_DIR}")
-        print("Starting FastAPI server without hardware integrations...")
+        logging.warning(
+            "PiProductivity failed to initialize. Hardware features will be disabled."
+        )
+        logging.info(f"Log files are located in: {LOG_DIR}")
+        logging.info("Starting FastAPI server without hardware integrations...")
         return
 
     thread = threading.Thread(target=sense.run_forever, daemon=True)
@@ -515,9 +532,9 @@ async def on_startup():
 
     asyncio.create_task(broadcast_loop())
 
-    print(f"Database is located at: {sense.db.path}")
-    print(f"Log files are located in: {LOG_DIR}")
-    print("Starting FastAPI server...")
+    logging.info(f"Database is located at: {sense.db.path}")
+    logging.info(f"Log files are located in: {LOG_DIR}")
+    logging.info("Starting FastAPI server...")
 
 # --- Main Execution ---
 if __name__ == "__main__":
