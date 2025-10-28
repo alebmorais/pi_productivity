@@ -8,6 +8,7 @@ summary for the e-paper widget.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -101,7 +102,10 @@ class TaskDatabase:
         get = payload.get
         task_id = get("id") or get("taskId") or get("uid") or get("_id")
         if task_id is None:
-            task_id = hash(json.dumps(payload, sort_keys=True))
+            # Bug fix: Use a stable SHA1 hash of the JSON payload
+            # to ensure the ID is deterministic.
+            payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+            task_id = hashlib.sha1(payload_bytes).hexdigest()
         task_id = str(task_id)
 
         title = (
