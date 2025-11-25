@@ -153,7 +153,7 @@ Ação: Captura nota via câmera e processa OCR
 Uso: Digitalizar notas manuscritas rapidamente
 ```
 
-#### 3. **Hapvida Mode** (Timer de 1 hora)
+#### 3. **TeleNeuro Mode** (Timer de 1 hora)
 ```
 Visual: Letra "H" verde → Barra verde progressiva
 Duração: 60 minutos
@@ -162,7 +162,7 @@ Uso: Turnos longos de trabalho focado
 Progresso: Barra de 8 pixels avançando
 ```
 
-#### 4. **CarePlus Mode** (Ciclos de 30 min)
+#### 4. **TeleC Mode** (Ciclos de 30 min)
 ```
 Visual: Letra "C" azul → Barra azul progressiva
 Duração: 30 minutos por ciclo
