@@ -193,7 +193,7 @@ Uso: Relaxamento, meditação, pausas
 
 1. Ligue o sistema → Modo inicial: `posture_check` (letra "P" azul)
 2. Mova joystick para a direita → Alterna para `ocr_capture` (letra "O" verde)
-3. Continue navegando → `hapvida`, `careplus`, `study_adhd`, `leisure`
+3. Continue navegando → `teleneuro`, `telec`, `study_adhd`, `leisure`
 4. Escolha `study_adhd` → Tela mostra "S" laranja por 0.5s
 5. Timer inicia → Tela fica verde (período de foco 20min)
 6. Último minuto → Pisca amarelo (aviso)

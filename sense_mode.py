@@ -137,7 +137,7 @@ class BaseTimerMode:
     def run(self):
         raise NotImplementedError
 
-class HapvidaMode(BaseTimerMode):
+class TeleNeuroMode(BaseTimerMode):
     '''Timer de 1h, no fim anima robô'''
     def run(self):
         start = time.time()
@@ -159,7 +159,7 @@ class HapvidaMode(BaseTimerMode):
                 sense.set_pixels(pixels)
                 time.sleep(2)
 
-class CarePlusMode(BaseTimerMode):
+class TeleCMode(BaseTimerMode):
     '''Ciclos de 30 min; arco-íris pisca nos últimos 5 min'''
     def run(self):
         block = 30*60

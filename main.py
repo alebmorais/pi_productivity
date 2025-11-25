@@ -101,8 +101,8 @@ class PiProductivity:
 
         # Sense HAT Mode Management
         self.sense_modes = {
-            "hapvida": sense_mode.HapvidaMode(),
-            "careplus": sense_mode.CarePlusMode(),
+            "teleneuro": sense_mode.TeleNeuroMode(),
+            "telec": sense_mode.TeleCMode(),
             "study_adhd": sense_mode.StudyADHDMode(),
             "leisure": sense_mode.LeisureMode(),
         }
@@ -276,10 +276,10 @@ class PiProductivity:
         elif name == "ocr_capture":
             letter = "O"
             color = [0, 200, 0] # Dark Green
-        elif name == "hapvida":
+        elif name == "teleneuro":
             letter = "H"
             color = sense_mode.GREEN
-        elif name == "careplus":
+        elif name == "telec":
             letter = "C"
             color = sense_mode.BLUE
         elif name == "study_adhd":
