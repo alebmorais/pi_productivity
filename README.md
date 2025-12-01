@@ -1,5 +1,7 @@
 # Pi Productivity Hub
 
+> ⚠️ **SECURITY NOTICE**: A Motion API key was accidentally exposed in an early commit of this repository (commit 2bb60b63). If you used this key, please revoke it immediately at https://www.usemotion.com/settings/developer and generate a new one. The current code properly uses environment variables for all secrets.
+
 Um hub de produtividade pessoal rodando em um Raspberry Pi. Este projeto integra, de maneira simples, hardware e software para ajudar no foco, organização e captura de notas:
 
 - **Sense HAT** — 6 modos de trabalho com controle via joystick e feedback visual LED 8×8
